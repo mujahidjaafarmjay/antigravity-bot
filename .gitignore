@@ -1,0 +1,35 @@
+# Python
+__pycache__/
+*.pyc
+*.pyo
+*.pyd
+.Python
+*.egg-info/
+dist/
+build/
+
+# Environment & secrets
+.env
+.env.*
+config_local.py
+
+# Logs (don't push local logs to GitHub)
+logs/*.csv
+logs/*.json
+
+# Bot state files
+bot_state.txt
+open_trades.json
+daily_stats.json
+
+# IDE
+.vscode/
+.idea/
+*.swp
+
+# OS
+.DS_Store
+Thumbs.db
+
+# Render
+*.log
