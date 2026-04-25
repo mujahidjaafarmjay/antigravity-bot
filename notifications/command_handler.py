@@ -1,45 +1,50 @@
 # ============================================================
 #  notifications/command_handler.py
-#  Fix #5:  profit_report reads correct file (logs/trades.csv)
-#  Fix #8:  pause state saved to Google Sheets, not disk file
-#  Fix #9:  no second BybitClient — receives bybit from main
+#  Fix Bug 6: self.storage assigned BEFORE _load_pause_state()
+#  Fix Bug 7: resume() calls risk.reset_daily_halt()
 # ============================================================
 import asyncio
 import os
 import csv
 from datetime import datetime
 from telegram import Update, ReplyKeyboardMarkup
-from telegram.ext import ApplicationBuilder, CommandHandler, ContextTypes, MessageHandler, filters
+from telegram.ext import (
+    ApplicationBuilder, CommandHandler,
+    ContextTypes, MessageHandler, filters
+)
 import config
 
 
 class TelegramCommandHandler:
-    def __init__(self, notifier, bybit, storage):
+    def __init__(self, notifier, bybit, storage, risk):
         """
-        Fix #9: bybit is passed in from main — no duplicate client.
-        storage is passed in so pause state can survive restarts.
+        Fix Bug 6: self.storage assigned FIRST before _load_pause_state().
+        Fix Bug 7: risk manager injected so resume can reset daily halt.
         """
-        self.notifier      = notifier
-        self.bybit         = bybit         # Fix #9: injected, not created here
-        self.storage       = storage       # Fix #8: for persistent pause state
-        self.paused        = self._load_pause_state()
-        self.scan_requested    = False
-        self.backtest_requested= False
-        self.active_trades = {}
+        # CRITICAL ORDER: storage must be set before calling _load_pause_state()
+        self.storage   = storage         # Fix Bug 6: FIRST
+        self.notifier  = notifier
+        self.bybit     = bybit
+        self.risk      = risk            # Fix Bug 7
+        self.paused    = self._load_pause_state()  # safe now — storage exists
+
+        self.scan_requested     = False
+        self.backtest_requested = False
+        self.active_trades      = {}
 
         self.keyboard = [
-            ["📊 Status",    "💰 Balance"],
-            ["📈 Open Trades","📅 Profit Report"],
-            ["🔍 Scan Setups","🛑 Pause Bot"],
-            ["🚀 Resume Bot", "❓ Help"],
+            ["📊 Status",     "💰 Balance"],
+            ["📈 Open Trades", "📅 Profit Report"],
+            ["🔍 Scan Setups", "🛑 Pause Bot"],
+            ["🚀 Resume Bot",  "❓ Help"],
         ]
         self.reply_markup = ReplyKeyboardMarkup(
             self.keyboard, resize_keyboard=True
         )
 
-    # ── Pause state persistence (Fix #8) ─────────────────────
+    # ── Pause state ───────────────────────────────────────────
+
     def _load_pause_state(self) -> bool:
-        """Read pause state from Google Sheets meta, not disk file."""
         try:
             if self.storage and self.storage.is_connected:
                 return self.storage.get_bot_meta("paused") == "true"
@@ -48,14 +53,15 @@ class TelegramCommandHandler:
         return False
 
     def _save_pause_state(self):
-        """Persist pause state to Google Sheets (Fix #8)."""
         try:
             if self.storage and self.storage.is_connected:
-                self.storage.set_bot_meta("paused", "true" if self.paused else "false")
+                self.storage.set_bot_meta(
+                    "paused", "true" if self.paused else "false"
+                )
         except Exception:
             pass
 
-    # ── Command handlers ──────────────────────────────────────
+    # ── Handlers ─────────────────────────────────────────────
 
     async def start(self, update: Update, context: ContextTypes.DEFAULT_TYPE):
         await update.message.reply_text(
@@ -68,14 +74,15 @@ class TelegramCommandHandler:
     async def status(self, update: Update, context: ContextTypes.DEFAULT_TYPE):
         balance     = self.bybit.get_balance("USDT")
         status_text = "🟢 <b>ACTIVE</b>" if not self.paused else "🟡 <b>PAUSED</b>"
-        n_trades    = len(self.active_trades)
+        bal_text    = f"${balance:.4f}" if balance > 0 else "⚠️ Unreadable — check API key"
         await update.message.reply_text(
             f"📊 <b>BOT STATUS</b>\n"
             f"━━━━━━━━━━━━━━━\n"
             f"<b>Status:</b>  {status_text}\n"
-            f"<b>Balance:</b> ${balance:.4f} USDT\n"
+            f"<b>Balance:</b> {bal_text} USDT\n"
             f"<b>Mode:</b>    {config.MODE.upper()}\n"
-            f"<b>Trades:</b>  {n_trades} open\n"
+            f"<b>Trades:</b>  {len(self.active_trades)} open\n"
+            f"<b>Limit:</b>   {config.DAILY_LOSS_LIMIT_PERCENT}% daily\n"
             f"━━━━━━━━━━━━━━━",
             parse_mode="HTML",
         )
@@ -95,19 +102,20 @@ class TelegramCommandHandler:
                 f"{icon} <b>{symbol}</b>\n"
                 f"Entry: ${data['entry']:.4f} | Now: ${price:.4f}\n"
                 f"SL: ${data['sl']:.4f} | TP: ${data['tp']:.4f}\n"
-                f"P&L: <b>{pnl:+.2f}%</b>\n"
+                f"P&amp;L: <b>{pnl:+.2f}%</b>\n"
                 f"━━━━━━━━━━━━━━━\n"
             )
         await update.message.reply_text(msg, parse_mode="HTML")
 
     async def profit_report(self, update: Update, context: ContextTypes.DEFAULT_TYPE):
-        """Fix #5: reads from logs/trades.csv (correct path)."""
         log_file = os.path.join(
             os.path.dirname(os.path.dirname(__file__)), "logs", "trades.csv"
         )
         if not os.path.exists(log_file):
             await update.message.reply_text(
-                "📅 <b>No trade history yet.</b>", parse_mode="HTML"
+                "📅 <b>No trade history yet.</b>\n"
+                "Trades will appear here once the bot makes its first entry.",
+                parse_mode="HTML",
             )
             return
         try:
@@ -116,22 +124,21 @@ class TelegramCommandHandler:
                 reader = csv.DictReader(f)
                 for row in reader:
                     trades.append(row)
-                    pnl = float(row.get("P&L", 0) or 0)
+                    # Fix: column is "Net_Profit" not "P&L"
+                    pnl = float(row.get("Net_Profit", 0) or 0)
                     total_pnl += pnl
                     if pnl > 0:
                         wins += 1
-
             closed = [t for t in trades if t.get("Status") == "CLOSED"]
             wr     = round(wins / len(closed) * 100) if closed else 0
             sign   = "+" if total_pnl >= 0 else ""
-
             await update.message.reply_text(
                 f"📅 <b>PROFIT REPORT</b>\n"
                 f"━━━━━━━━━━━━━━━\n"
-                f"<b>Total Trades:</b>  {len(trades)}\n"
-                f"<b>Closed:</b>        {len(closed)}\n"
-                f"<b>Win Rate:</b>      {wr}%\n"
-                f"<b>Total P&L:</b>     {sign}${total_pnl:.4f} USDT\n"
+                f"<b>Total Trades:</b> {len(trades)}\n"
+                f"<b>Closed:</b>       {len(closed)}\n"
+                f"<b>Win Rate:</b>     {wr}%\n"
+                f"<b>Total P&amp;L:</b>    {sign}${total_pnl:.4f} USDT\n"
                 f"━━━━━━━━━━━━━━━",
                 parse_mode="HTML",
             )
@@ -142,17 +149,24 @@ class TelegramCommandHandler:
 
     async def pause(self, update: Update, context: ContextTypes.DEFAULT_TYPE):
         self.paused = True
-        self._save_pause_state()   # Fix #8
+        self._save_pause_state()
         await update.message.reply_text(
             "🛑 <b>Bot Paused.</b> No new trades until you resume.",
             parse_mode="HTML",
         )
 
     async def resume(self, update: Update, context: ContextTypes.DEFAULT_TYPE):
+        """
+        Fix Bug 7: also resets daily halt so bot can trade again.
+        """
         self.paused = False
-        self._save_pause_state()   # Fix #8
+        self._save_pause_state()
+        # Fix Bug 7: clear the daily halt flag
+        if self.risk:
+            self.risk.reset_daily_halt()
         await update.message.reply_text(
-            "🚀 <b>Bot Resumed.</b> Scanning for signals now...",
+            "🚀 <b>Bot Resumed.</b>\n"
+            "Daily halt cleared. Scanning for signals now...",
             parse_mode="HTML",
         )
 
@@ -161,11 +175,12 @@ class TelegramCommandHandler:
             "❓ <b>Commands</b>\n\n"
             "📊 Status       — bot health + balance\n"
             "💰 Balance       — USDT balance\n"
-            "📈 Open Trades   — live trade monitor\n"
+            "📈 Open Trades   — live positions\n"
             "📅 Profit Report — trade history\n"
-            "🔍 Scan Setups   — manual market scan\n"
+            "🔍 Scan Setups   — manual scan now\n"
             "🛑 Pause Bot     — stop new entries\n"
-            "🚀 Resume Bot    — resume scanning\n",
+            "🚀 Resume Bot    — resume + reset halt\n"
+            "❓ Help          — this message",
             parse_mode="HTML",
         )
 
@@ -184,14 +199,16 @@ class TelegramCommandHandler:
         elif text == "🔍 Scan Setups":
             self.scan_requested = True
             await update.message.reply_text(
-                f"🔍 <b>Manual Scan started.</b> Checking {len(config.WHITELIST_PAIRS)} pairs...",
+                f"🔍 <b>Manual Scan started.</b> "
+                f"Checking {len(config.WHITELIST_PAIRS)} pairs...",
                 parse_mode="HTML",
             )
         elif text == "❓ Help":
             await self.help_cmd(update, context)
 
     async def run_listener(self):
-        """Start Telegram polling with auto-retry."""
+        """Telegram polling with clean shutdown on retry."""
+        app = None
         while True:
             try:
                 app = ApplicationBuilder().token(config.TELEGRAM_TOKEN).build()
@@ -212,5 +229,14 @@ class TelegramCommandHandler:
                 while True:
                     await asyncio.sleep(3600)
             except Exception as e:
-                print(f"[Telegram] Listener error: {e} — retrying in 30s")
+                print(f"[Telegram] Error: {e} — retrying in 30s")
+                # Fix: clean shutdown before rebuilding app
+                try:
+                    if app:
+                        await app.updater.stop()
+                        await app.stop()
+                        await app.shutdown()
+                except Exception:
+                    pass
+                app = None
                 await asyncio.sleep(30)

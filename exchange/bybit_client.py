@@ -1,7 +1,8 @@
 # ============================================================
 #  exchange/bybit_client.py
-#  Fix #3: limit=250 so MA200 has enough data
-#  Fix #9: removed duplicate BybitClient from command_handler
+#  Fix BALANCE: Try all account types properly.
+#              Never break early on empty coin list.
+#              SPOT accounts only have balance under "SPOT" type.
 # ============================================================
 import time
 import math
@@ -18,59 +19,63 @@ class BybitClient:
             domain="bytick",
             timeout=30,
         )
-        self.category  = "spot"
+        self.category   = "spot"
         self.precisions = {}
+        print(f"[Bybit] Mode: {config.MODE.upper()} | Testnet: {config.TESTNET}")
 
     # ── Balance ───────────────────────────────────────────────
-    def get_balance(self, coin="USDT") -> float:
-        for acc_type in ["UNIFIED", "FUND", "SPOT"]:
-            for attempt in range(3):
-                try:
-                    resp = self.session.get_wallet_balance(
-                        accountType=acc_type, coin=coin
-                    )
-                    if resp["retCode"] == 0:
-                        list_data = resp["result"].get("list", [])
-                        if not list_data:
-                            break
-                        for item in list_data[0].get("coin", []):
-                            if item["coin"] == coin:
-                                val = float(
-                                    item.get("walletBalance", 0)
-                                    or item.get("equity", 0)
-                                )
-                                if val > 0:
-                                    return val
-                        break
-                except Exception as e:
-                    err = str(e)
-                    if "timed out" in err.lower() or "Connection" in err:
-                        print(f"[Balance] timeout {acc_type} attempt {attempt+1}")
-                        time.sleep(5)
-                    else:
-                        print(f"[Balance] {acc_type}: {e}")
-                        break
+    def get_balance(self, coin: str = "USDT") -> float:
+        """
+        Fix BALANCE BUG: Try UNIFIED, SPOT, FUND in order.
+        Never break early on empty coin list — continue to next type.
+        Bybit spot-only accounts have balance under accountType=SPOT.
+        """
+        for acc_type in ["UNIFIED", "SPOT", "FUND"]:
+            try:
+                resp = self.session.get_wallet_balance(
+                    accountType=acc_type, coin=coin
+                )
+                if resp.get("retCode") != 0:
+                    continue  # this account type not supported — try next
+
+                list_data = resp["result"].get("list", [])
+                if not list_data:
+                    continue  # empty — try next account type (was: break — BUG)
+
+                for item in list_data[0].get("coin", []):
+                    if item["coin"] == coin:
+                        # Try walletBalance first, then availableToWithdraw
+                        val = float(item.get("walletBalance") or
+                                    item.get("availableToWithdraw") or
+                                    item.get("equity") or 0)
+                        if val > 0:
+                            print(f"[Balance] Found ${val:.4f} USDT in {acc_type}")
+                            return val
+                # coin not in this account type — try next
+                continue
+
+            except Exception as e:
+                print(f"[Balance] {acc_type} error: {e}")
+                continue
+
+        print("[Balance] Could not find USDT balance in any account type.")
         return 0.0
 
     # ── Candles ───────────────────────────────────────────────
-    def get_candles(self, symbol: str, interval: str, limit: int = 250):
-        """
-        Fetch OHLCV candles.
-        Fix #3: default limit=250 (was 100) so MA200 has enough history.
-        Bybit returns newest-first — sorting is done in brain.py.
-        """
+    def get_candles(self, symbol: str, interval: str, limit: int = 250) -> list:
+        """Fetch OHLCV. Returns newest-first (brain.py sorts ascending)."""
         try:
             resp = self.session.get_kline(
                 category=self.category,
                 symbol=symbol,
                 interval=interval,
-                limit=limit,       # Fix #3
+                limit=limit,
             )
-            if resp["retCode"] == 0:
+            if resp.get("retCode") == 0:
                 return resp["result"]["list"]
             return []
         except Exception as e:
-            print(f"[Candles] {symbol}: {e}")
+            print(f"[Candles] {symbol}/{interval}: {e}")
             return []
 
     # ── Ticker ────────────────────────────────────────────────
@@ -79,7 +84,7 @@ class BybitClient:
             resp = self.session.get_tickers(
                 category=self.category, symbol=symbol
             )
-            if resp["retCode"] == 0:
+            if resp.get("retCode") == 0:
                 return float(resp["result"]["list"][0]["lastPrice"])
             return None
         except Exception as e:
@@ -96,16 +101,16 @@ class BybitClient:
         order_type: str = "Market",
     ) -> dict:
         if config.MODE == "paper":
-            print(f"[PAPER] {side} {qty} {symbol}")
-            return {"retCode": 0, "result": {"orderId": f"paper_{int(time.time())}"}}
+            fake_id = f"paper_{int(time.time())}"
+            print(f"[PAPER] {side} {qty} {symbol} → {fake_id}")
+            return {"retCode": 0, "result": {"orderId": fake_id}}
 
         try:
-            # Get and cache precision
             if symbol not in self.precisions:
                 r = self.session.get_instruments_info(
                     category=self.category, symbol=symbol
                 )
-                if r["retCode"] == 0:
+                if r.get("retCode") == 0:
                     step = r["result"]["list"][0]["lotSizeFilter"]["basePrecision"]
                     self.precisions[symbol] = step
                 else:
@@ -113,7 +118,7 @@ class BybitClient:
 
             step_str = self.precisions[symbol]
             if "." in step_str:
-                decimals = len(step_str.split(".")[1])
+                decimals = len(step_str.rstrip("0").split(".")[1])
                 factor   = 10 ** decimals
                 qty      = math.floor(qty * factor) / factor
             else:
@@ -130,7 +135,13 @@ class BybitClient:
             if price:
                 params["price"] = str(price)
 
-            return self.session.place_order(**params)
+            result = self.session.place_order(**params)
+            if result.get("retCode") == 0:
+                print(f"[Order] {side} {qty} {symbol} placed ✓")
+            else:
+                print(f"[Order] {side} {symbol} failed: {result.get('retMsg')}")
+            return result
+
         except Exception as e:
             print(f"[Order] {symbol}: {e}")
             return {"retCode": -1, "retMsg": str(e)}

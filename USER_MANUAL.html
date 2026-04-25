@@ -1,0 +1,1008 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8"/>
+<meta name="viewport" content="width=device-width,initial-scale=1.0"/>
+<title>Antigravity SMC Bot — User Manual</title>
+<link href="https://fonts.googleapis.com/css2?family=Space+Grotesk:wght@300;400;500;600;700&family=JetBrains+Mono:wght@400;500;700&display=swap" rel="stylesheet"/>
+<style>
+:root{
+  --bg:#060608;--s1:#0d0d12;--s2:#13131a;--s3:#1a1a24;--s4:#22222e;
+  --border:#2a2a3a;--border2:#353548;
+  --text:#e8e8f0;--text2:#9090a8;--text3:#555568;
+  --green:#00e5a0;--gdim:#051a12;--gmid:#00704e;
+  --red:#ff4466;--rdim:#1a0510;
+  --amber:#ffb020;--adim:#1a1205;
+  --blue:#4488ff;--bdim:#050d1a;
+  --purple:#a855f7;--pdim:#150a1a;
+  --accent:#00e5a0;
+}
+*{box-sizing:border-box;margin:0;padding:0;}
+html{scroll-behavior:smooth;}
+body{font-family:'Space Grotesk',sans-serif;background:var(--bg);color:var(--text);line-height:1.7;font-size:15px;}
+.mono{font-family:'JetBrains Mono',monospace;}
+
+/* ── SIDEBAR NAV ── */
+.layout{display:flex;min-height:100vh;}
+.sidebar{width:260px;flex-shrink:0;background:var(--s1);border-right:1px solid var(--border);position:fixed;top:0;left:0;height:100vh;overflow-y:auto;z-index:100;}
+.sidebar-logo{padding:1.5rem 1.25rem 1rem;border-bottom:1px solid var(--border);}
+.logo-tag{font-size:10px;letter-spacing:.2em;color:var(--accent);margin-bottom:4px;}
+.logo-title{font-size:1rem;font-weight:700;color:var(--text);}
+.logo-sub{font-size:11px;color:var(--text3);margin-top:2px;}
+.nav-group{padding:.75rem 0;}
+.nav-group-title{font-size:10px;letter-spacing:.15em;color:var(--text3);padding:.25rem 1.25rem .5rem;font-weight:600;}
+.nav-link{display:flex;align-items:center;gap:8px;padding:.45rem 1.25rem;font-size:13px;color:var(--text2);text-decoration:none;cursor:pointer;transition:all .15s;border-left:2px solid transparent;}
+.nav-link:hover{color:var(--text);background:var(--s2);border-left-color:var(--border2);}
+.nav-link.active{color:var(--accent);background:var(--gdim);border-left-color:var(--accent);}
+.nav-icon{font-size:14px;width:18px;text-align:center;}
+
+/* ── MAIN CONTENT ── */
+.content{margin-left:260px;max-width:860px;padding:2.5rem 3rem 6rem;}
+@media(max-width:900px){.sidebar{display:none;}.content{margin-left:0;padding:2rem 1.25rem 4rem;}}
+
+/* ── PAGE HEADER ── */
+.page-header{padding-bottom:2rem;border-bottom:1px solid var(--border);margin-bottom:2.5rem;}
+.page-eyebrow{font-size:11px;letter-spacing:.2em;color:var(--accent);margin-bottom:.6rem;font-weight:500;}
+.page-title{font-size:2.2rem;font-weight:700;line-height:1.15;margin-bottom:.75rem;}
+.page-title span{color:var(--accent);}
+.page-subtitle{font-size:14px;color:var(--text2);max-width:560px;line-height:1.7;}
+
+/* ── SECTION ── */
+.section{margin-bottom:3.5rem;scroll-margin-top:2rem;}
+.section-header{display:flex;align-items:center;gap:12px;margin-bottom:1.5rem;}
+.section-num{font-family:'JetBrains Mono',monospace;font-size:11px;color:var(--accent);border:1px solid var(--gmid);padding:3px 9px;border-radius:4px;}
+.section-title{font-size:1.3rem;font-weight:700;}
+.subsection{margin-bottom:2rem;}
+.subsection-title{font-size:1rem;font-weight:600;color:var(--text);margin-bottom:.75rem;padding-bottom:.5rem;border-bottom:1px solid var(--border);}
+
+/* ── PROSE ── */
+p{font-size:14px;color:var(--text2);line-height:1.8;margin-bottom:.85rem;}
+p strong{color:var(--text);font-weight:500;}
+p:last-child{margin-bottom:0;}
+
+/* ── STEPS ── */
+.steps{display:flex;flex-direction:column;gap:0;}
+.step{display:flex;gap:16px;padding:1.1rem 0;border-bottom:1px solid var(--border);}
+.step:last-child{border-bottom:none;}
+.step-circle{width:32px;height:32px;border-radius:50%;background:var(--gdim);border:1px solid var(--gmid);display:flex;align-items:center;justify-content:center;font-family:'JetBrains Mono',monospace;font-size:12px;color:var(--accent);flex-shrink:0;margin-top:2px;}
+.step-content{}
+.step-title{font-size:14px;font-weight:600;margin-bottom:.35rem;}
+.step-desc{font-size:13px;color:var(--text2);line-height:1.7;}
+.step-desc strong{color:var(--text);font-weight:500;}
+.step-desc code{font-family:'JetBrains Mono',monospace;font-size:12px;background:var(--s3);padding:1px 6px;border-radius:3px;color:var(--accent);}
+
+/* ── CODE BLOCK ── */
+.code-block{background:var(--s2);border:1px solid var(--border2);border-radius:8px;overflow:hidden;margin:.85rem 0;}
+.code-header{display:flex;justify-content:space-between;align-items:center;padding:.5rem 1rem;background:var(--s3);border-bottom:1px solid var(--border);font-size:11px;color:var(--text3);}
+.code-body{padding:1rem 1.25rem;font-family:'JetBrains Mono',monospace;font-size:12.5px;line-height:1.9;overflow-x:auto;white-space:pre;}
+.code-body .c{color:var(--text3);}
+.code-body .k{color:var(--purple);}
+.code-body .s{color:var(--green);}
+.code-body .v{color:var(--amber);}
+.code-body .cmd{color:var(--accent);}
+
+/* ── ENV TABLE ── */
+.env-table{width:100%;border-collapse:collapse;margin:.85rem 0;}
+.env-table th{font-size:11px;letter-spacing:.08em;color:var(--text3);padding:.6rem .75rem;text-align:left;border-bottom:1px solid var(--border);font-weight:600;}
+.env-table td{padding:.65rem .75rem;border-bottom:1px solid var(--border);font-size:13px;vertical-align:top;}
+.env-table tr:last-child td{border-bottom:none;}
+.env-table tr:hover td{background:var(--s2);}
+.env-key{font-family:'JetBrains Mono',monospace;font-size:12px;color:var(--accent);}
+.env-req{font-size:11px;padding:2px 7px;border-radius:4px;font-weight:500;}
+.req-yes{background:var(--rdim);color:var(--red);}
+.req-opt{background:var(--adim);color:var(--amber);}
+.env-desc{color:var(--text2);}
+
+/* ── BUTTON GRID ── */
+.btn-grid{display:grid;grid-template-columns:1fr 1fr;gap:8px;margin:.85rem 0;}
+@media(max-width:600px){.btn-grid{grid-template-columns:1fr;}}
+.btn-card{background:var(--s2);border:1px solid var(--border);border-radius:8px;padding:1rem;}
+.btn-label{font-size:13px;font-weight:600;margin-bottom:.3rem;}
+.btn-desc{font-size:12px;color:var(--text2);line-height:1.6;}
+
+/* ── ALERT CARDS ── */
+.alert{border-radius:8px;padding:1rem 1.25rem;margin:.85rem 0;font-size:13px;line-height:1.7;}
+.alert strong{font-weight:600;}
+.alert-red{background:var(--rdim);border:1px solid #3a1020;color:#ffaabb;}
+.alert-green{background:var(--gdim);border:1px solid var(--gmid);color:#80f0c0;}
+.alert-amber{background:var(--adim);border:1px solid #3a2a05;color:#ffcc70;}
+.alert-blue{background:var(--bdim);border:1px solid #0d2550;color:#88bbff;}
+
+/* ── INFO CARDS ── */
+.info-grid{display:grid;grid-template-columns:1fr 1fr;gap:10px;margin:.85rem 0;}
+@media(max-width:600px){.info-grid{grid-template-columns:1fr;}}
+.info-card{background:var(--s2);border:1px solid var(--border);border-radius:8px;padding:1.1rem;}
+.info-card-title{font-size:11px;letter-spacing:.1em;color:var(--text3);margin-bottom:.4rem;font-weight:600;}
+.info-card-val{font-size:1.3rem;font-weight:700;font-family:'JetBrains Mono',monospace;color:var(--accent);}
+.info-card-sub{font-size:12px;color:var(--text2);margin-top:.3rem;}
+
+/* ── MODE BADGE ── */
+.mode-badge{display:inline-flex;align-items:center;gap:6px;font-size:12px;padding:4px 10px;border-radius:4px;font-weight:500;margin:2px;}
+.mode-paper{background:var(--bdim);color:var(--blue);border:1px solid #0d2550;}
+.mode-testnet{background:var(--adim);color:var(--amber);border:1px solid #3a2a05;}
+.mode-live{background:var(--rdim);color:var(--red);border:1px solid #3a1020;}
+
+/* ── FLOW DIAGRAM ── */
+.flow{display:flex;flex-direction:column;gap:0;margin:.85rem 0;}
+.flow-item{display:flex;align-items:flex-start;gap:12px;padding:.85rem 0;}
+.flow-line{display:flex;flex-direction:column;align-items:center;flex-shrink:0;}
+.flow-dot{width:10px;height:10px;border-radius:50%;background:var(--accent);flex-shrink:0;margin-top:5px;}
+.flow-connector{width:2px;flex:1;background:var(--border);min-height:20px;margin-top:4px;}
+.flow-item:last-child .flow-connector{display:none;}
+.flow-content{}
+.flow-title{font-size:13px;font-weight:600;margin-bottom:2px;}
+.flow-desc{font-size:12px;color:var(--text2);}
+
+/* ── DIVIDER ── */
+hr{border:none;border-top:1px solid var(--border);margin:2.5rem 0;}
+
+/* ── TAG ── */
+.tag{display:inline-block;font-size:11px;padding:2px 8px;border-radius:4px;font-weight:500;margin:1px;}
+.tag-green{background:var(--gdim);color:var(--green);}
+.tag-red{background:var(--rdim);color:var(--red);}
+.tag-blue{background:var(--bdim);color:var(--blue);}
+.tag-amber{background:var(--adim);color:var(--amber);}
+
+/* ── FOOTER ── */
+footer{border-top:1px solid var(--border);padding:1.5rem 0;margin-top:2rem;font-size:12px;color:var(--text3);text-align:center;}
+</style>
+</head>
+<body>
+
+<!-- SIDEBAR -->
+<div class="layout">
+<nav class="sidebar">
+  <div class="sidebar-logo">
+    <div class="logo-tag">DOCUMENTATION</div>
+    <div class="logo-title">Antigravity SMC Bot</div>
+    <div class="logo-sub">User Manual v3</div>
+  </div>
+
+  <div class="nav-group">
+    <div class="nav-group-title">GETTING STARTED</div>
+    <a class="nav-link active" onclick="scrollTo('overview')"><span class="nav-icon">📖</span>Overview</a>
+    <a class="nav-link" onclick="scrollTo('prerequisites')"><span class="nav-icon">🔧</span>Prerequisites</a>
+    <a class="nav-link" onclick="scrollTo('github')"><span class="nav-icon">🐙</span>GitHub Setup</a>
+    <a class="nav-link" onclick="scrollTo('render')"><span class="nav-icon">☁️</span>Deploy to Render</a>
+    <a class="nav-link" onclick="scrollTo('envvars')"><span class="nav-icon">🔑</span>Environment Variables</a>
+  </div>
+
+  <div class="nav-group">
+    <div class="nav-group-title">CONFIGURATION</div>
+    <a class="nav-link" onclick="scrollTo('modes')"><span class="nav-icon">🎛️</span>Trading Modes</a>
+    <a class="nav-link" onclick="scrollTo('sheets')"><span class="nav-icon">📊</span>Google Sheets</a>
+    <a class="nav-link" onclick="scrollTo('uptime')"><span class="nav-icon">⏱️</span>UptimeRobot</a>
+    <a class="nav-link" onclick="scrollTo('telegram')"><span class="nav-icon">💬</span>Telegram Setup</a>
+  </div>
+
+  <div class="nav-group">
+    <div class="nav-group-title">USING THE BOT</div>
+    <a class="nav-link" onclick="scrollTo('commands')"><span class="nav-icon">🎮</span>Telegram Commands</a>
+    <a class="nav-link" onclick="scrollTo('alerts')"><span class="nav-icon">🔔</span>Alert Types</a>
+    <a class="nav-link" onclick="scrollTo('monitoring')"><span class="nav-icon">📡</span>Monitoring</a>
+  </div>
+
+  <div class="nav-group">
+    <div class="nav-group-title">HOW IT WORKS</div>
+    <a class="nav-link" onclick="scrollTo('strategy')"><span class="nav-icon">🧠</span>Strategy Logic</a>
+    <a class="nav-link" onclick="scrollTo('risk')"><span class="nav-icon">🛡️</span>Risk Management</a>
+    <a class="nav-link" onclick="scrollTo('sharia')"><span class="nav-icon">✅</span>Sharia Filter</a>
+  </div>
+
+  <div class="nav-group">
+    <div class="nav-group-title">REFERENCE</div>
+    <a class="nav-link" onclick="scrollTo('progression')"><span class="nav-icon">📈</span>Progression Plan</a>
+    <a class="nav-link" onclick="scrollTo('troubleshoot')"><span class="nav-icon">🔍</span>Troubleshooting</a>
+    <a class="nav-link" onclick="scrollTo('security')"><span class="nav-icon">🔒</span>Security</a>
+    <a class="nav-link" onclick="scrollTo('files')"><span class="nav-icon">📁</span>File Reference</a>
+  </div>
+</nav>
+
+<!-- MAIN CONTENT -->
+<main class="content">
+
+<!-- PAGE HEADER -->
+<div class="page-header">
+  <div class="page-eyebrow">ANTIGRAVITY SMC BOT — v3</div>
+  <h1 class="page-title">User Manual &amp;<br/><span>Complete Guide</span></h1>
+  <p class="page-subtitle">Everything you need to deploy, configure, and operate your Bybit spot trading bot on Render. Read from top to bottom on first setup. Refer back to individual sections as needed.</p>
+</div>
+
+<!-- ═══════════════════════════════════════════════ OVERVIEW -->
+<section class="section" id="overview">
+  <div class="section-header"><span class="section-num">01</span><span class="section-title">Overview</span></div>
+
+  <p>The Antigravity SMC Bot is an automated crypto spot trading bot that runs 24/7 on Render's free cloud tier. It scans <strong>25 Sharia-compliant pairs</strong> every 5 minutes, identifies high-probability Smart Money Concept (SMC) setups, and places trades on your Bybit account automatically.</p>
+
+  <p>All trade history is saved to Google Sheets so it survives Render restarts. You control the bot entirely from your phone via Telegram buttons — no coding required after setup.</p>
+
+  <div class="info-grid">
+    <div class="info-card"><div class="info-card-title">SCAN INTERVAL</div><div class="info-card-val">5 min</div><div class="info-card-sub">Checks all 25 pairs every 5 minutes</div></div>
+    <div class="info-card"><div class="info-card-title">MAX OPEN TRADES</div><div class="info-card-val">2</div><div class="info-card-sub">Never holds more than 2 positions</div></div>
+    <div class="info-card"><div class="info-card-title">RISK PER TRADE</div><div class="info-card-val">2%</div><div class="info-card-sub">Maximum capital at risk per trade</div></div>
+    <div class="info-card"><div class="info-card-title">DAILY LOSS LIMIT</div><div class="info-card-val">5%</div><div class="info-card-sub">Bot halts automatically if hit</div></div>
+  </div>
+
+  <div class="alert alert-amber"><strong>Important:</strong> Always start in <code>paper</code> mode first. Run for at least 2 weeks before switching to live money. Paper mode uses real prices but places zero real orders.</div>
+</section>
+
+<!-- ═══════════════════════════════════════════ PREREQUISITES -->
+<section class="section" id="prerequisites">
+  <div class="section-header"><span class="section-num">02</span><span class="section-title">Prerequisites</span></div>
+  <p>Before starting, make sure you have accounts on these four platforms. All are free.</p>
+
+  <div class="steps">
+    <div class="step">
+      <div class="step-circle">1</div>
+      <div class="step-content">
+        <div class="step-title">Bybit account</div>
+        <div class="step-desc">Sign up at <strong>bybit.com</strong>. Complete identity verification (KYC). You need a Spot wallet with USDT balance. Keep your API key permissions set to <strong>Read + Spot Trade only</strong> — never enable withdrawals.</div>
+      </div>
+    </div>
+    <div class="step">
+      <div class="step-circle">2</div>
+      <div class="step-content">
+        <div class="step-title">Telegram account + bot token</div>
+        <div class="step-desc">You need a Telegram account and a bot created via <strong>@BotFather</strong>. This gives you a token like <code>7123456789:AAH...</code>. You also need your personal chat ID from <strong>@userinfobot</strong>.</div>
+      </div>
+    </div>
+    <div class="step">
+      <div class="step-circle">3</div>
+      <div class="step-content">
+        <div class="step-title">GitHub account</div>
+        <div class="step-desc">Sign up at <strong>github.com</strong>. The bot code lives in a private GitHub repo. Render pulls from GitHub to deploy. Your secrets are never stored in the repo — they go in Render's environment variables.</div>
+      </div>
+    </div>
+    <div class="step">
+      <div class="step-circle">4</div>
+      <div class="step-content">
+        <div class="step-title">Render account</div>
+        <div class="step-desc">Sign up at <strong>render.com</strong> using your GitHub account. The free tier gives you one web service that runs continuously (with UptimeRobot keeping it awake). No credit card required for free tier.</div>
+      </div>
+    </div>
+    <div class="step">
+      <div class="step-circle">5</div>
+      <div class="step-content">
+        <div class="step-title">Google account (for Sheets persistence)</div>
+        <div class="step-desc">You need a Google account to create a Google Sheet and a service account via <strong>Google Cloud Console</strong>. This stores open trades so they survive Render restarts. Fully optional but strongly recommended.</div>
+      </div>
+    </div>
+  </div>
+</section>
+
+<!-- ═══════════════════════════════════════════ GITHUB SETUP -->
+<section class="section" id="github">
+  <div class="section-header"><span class="section-num">03</span><span class="section-title">GitHub Setup</span></div>
+
+  <p>Push the bot code to a <strong>private</strong> GitHub repository. Never make it public — even though secrets are in env vars, you still don't want your trading code visible to everyone.</p>
+
+  <div class="subsection">
+    <div class="subsection-title">Create a private repo and push</div>
+    <div class="code-block">
+      <div class="code-header"><span>Terminal — run from inside the render_bot folder</span></div>
+      <div class="code-body"><span class="cmd">git init</span>
+<span class="cmd">git add .</span>
+<span class="cmd">git commit -m "initial commit"</span>
+<span class="c"># Create a new PRIVATE repo on github.com first, then:</span>
+<span class="cmd">git remote add origin https://github.com/YOUR_USERNAME/YOUR_REPO_NAME.git</span>
+<span class="cmd">git branch -M main</span>
+<span class="cmd">git push -u origin main</span></div>
+    </div>
+  </div>
+
+  <div class="alert alert-red"><strong>Never commit secrets.</strong> The <code>.gitignore</code> already excludes <code>.env</code> files and state files. Verify <code>config.py</code> contains NO real API keys before pushing — all values should read <code>os.environ.get(...)</code>.</div>
+
+  <div class="subsection" style="margin-top:1.5rem;">
+    <div class="subsection-title">Updating the bot after changes</div>
+    <div class="code-block">
+      <div class="code-header"><span>Push updates — Render auto-deploys on every push to main</span></div>
+      <div class="code-body"><span class="cmd">git add .</span>
+<span class="cmd">git commit -m "describe your change"</span>
+<span class="cmd">git push</span>
+<span class="c"># Render detects the push and redeploys automatically within ~2 minutes</span></div>
+    </div>
+  </div>
+</section>
+
+<!-- ══════════════════════════════════════════════ RENDER -->
+<section class="section" id="render">
+  <div class="section-header"><span class="section-num">04</span><span class="section-title">Deploy to Render</span></div>
+
+  <div class="steps">
+    <div class="step">
+      <div class="step-circle">1</div>
+      <div class="step-content">
+        <div class="step-title">Create a new Web Service</div>
+        <div class="step-desc">Log into <strong>render.com</strong> → click <strong>New +</strong> → select <strong>Web Service</strong> → connect your GitHub account → select your bot repository.</div>
+      </div>
+    </div>
+    <div class="step">
+      <div class="step-circle">2</div>
+      <div class="step-content">
+        <div class="step-title">Configure the service</div>
+        <div class="step-desc">
+          Set these fields exactly:<br/>
+          <strong>Name:</strong> anything you like (e.g. <code>antigravity-bot</code>)<br/>
+          <strong>Environment:</strong> Python 3<br/>
+          <strong>Build Command:</strong> <code>pip install -r requirements.txt</code><br/>
+          <strong>Start Command:</strong> <code>python main.py</code><br/>
+          <strong>Instance Type:</strong> Free
+        </div>
+      </div>
+    </div>
+    <div class="step">
+      <div class="step-circle">3</div>
+      <div class="step-content">
+        <div class="step-title">Add environment variables</div>
+        <div class="step-desc">Before clicking Deploy, scroll down to <strong>Environment Variables</strong> and add all required keys. See the full list in Section 05 below.</div>
+      </div>
+    </div>
+    <div class="step">
+      <div class="step-circle">4</div>
+      <div class="step-content">
+        <div class="step-title">Click Create Web Service</div>
+        <div class="step-desc">Render will build and deploy the bot. Watch the <strong>Logs</strong> tab. Within 60 seconds you should receive a Telegram message saying <strong>🟢 Bot Started on Render</strong>.</div>
+      </div>
+    </div>
+    <div class="step">
+      <div class="step-circle">5</div>
+      <div class="step-content">
+        <div class="step-title">Note your service URL</div>
+        <div class="step-desc">Render gives you a URL like <code>https://antigravity-bot.onrender.com</code>. Copy this — you will need it for UptimeRobot. Your health endpoints are <code>/ping</code> and <code>/status</code>.</div>
+      </div>
+    </div>
+  </div>
+
+  <div class="alert alert-blue"><strong>Free tier behaviour:</strong> Render free services spin down after 15 minutes of no HTTP traffic. UptimeRobot (Section 08) pings <code>/ping</code> every 5 minutes to prevent this. Without UptimeRobot the bot will stop running.</div>
+</section>
+
+<!-- ══════════════════════════════════════════ ENV VARS -->
+<section class="section" id="envvars">
+  <div class="section-header"><span class="section-num">05</span><span class="section-title">Environment Variables</span></div>
+  <p>Set these in Render → your service → <strong>Environment</strong> tab. These are the only place your secrets ever exist — not in any file, not in GitHub.</p>
+
+  <table class="env-table">
+    <thead><tr><th>Key</th><th>Required</th><th>Description</th></tr></thead>
+    <tbody>
+      <tr><td><span class="env-key">BYBIT_API_KEY</span></td><td><span class="env-req req-yes">Required</span></td><td class="env-desc">Your Bybit API key. Permissions: Read + Spot Trade only.</td></tr>
+      <tr><td><span class="env-key">BYBIT_API_SECRET</span></td><td><span class="env-req req-yes">Required</span></td><td class="env-desc">Your Bybit API secret key.</td></tr>
+      <tr><td><span class="env-key">TELEGRAM_TOKEN</span></td><td><span class="env-req req-yes">Required</span></td><td class="env-desc">Bot token from @BotFather. Format: <code>7123456789:AAH...</code></td></tr>
+      <tr><td><span class="env-key">TELEGRAM_CHAT_ID</span></td><td><span class="env-req req-yes">Required</span></td><td class="env-desc">Your personal chat ID from @userinfobot. Numbers only.</td></tr>
+      <tr><td><span class="env-key">MODE</span></td><td><span class="env-req req-yes">Required</span></td><td class="env-desc">Start with <code>paper</code>. Options: <code>paper</code> | <code>testnet</code> | <code>live</code></td></tr>
+      <tr><td><span class="env-key">GOOGLE_SHEETS_CREDENTIALS</span></td><td><span class="env-req req-opt">Optional</span></td><td class="env-desc">Full JSON content of your Google service account key file. Paste the entire JSON as one value.</td></tr>
+      <tr><td><span class="env-key">GOOGLE_SHEET_NAME</span></td><td><span class="env-req req-opt">Optional</span></td><td class="env-desc">Name of your Google Sheet. Default: <code>Antigravity Trades</code></td></tr>
+    </tbody>
+  </table>
+
+  <div class="alert alert-green"><strong>How to find your Telegram Chat ID:</strong> Open Telegram → search <strong>@userinfobot</strong> → tap Start → it replies with your ID. It looks like a number: <code>1234567890</code></div>
+
+  <div class="alert alert-amber"><strong>Changing MODE to live:</strong> In Render → Environment → find the MODE variable → change value to <code>live</code> → click Save. Render will automatically redeploy with the new value. You will receive a Telegram notification confirming LIVE MODE is active.</div>
+</section>
+
+<!-- ════════════════════════════════════════════ MODES -->
+<section class="section" id="modes">
+  <div class="section-header"><span class="section-num">06</span><span class="section-title">Trading Modes</span></div>
+
+  <p>The bot has three operating modes. Always start with paper and progress in order.</p>
+
+  <div class="subsection">
+    <div class="subsection-title">Mode comparison</div>
+    <div class="steps">
+      <div class="step">
+        <div class="step-circle" style="background:var(--bdim);border-color:#0d2550;">📋</div>
+        <div class="step-content">
+          <div class="step-title"><span class="mode-badge mode-paper">📋 PAPER</span></div>
+          <div class="step-desc">Uses <strong>real live prices</strong> from Bybit but places <strong>zero real orders</strong>. All logic runs normally — signals fire, SL/TP triggers, Telegram alerts send — but no money moves. The safest way to learn how the bot behaves. <strong>Start here. Run for at least 2 weeks.</strong></div>
+        </div>
+      </div>
+      <div class="step">
+        <div class="step-circle" style="background:var(--adim);border-color:#3a2a05;">🧪</div>
+        <div class="step-content">
+          <div class="step-title"><span class="mode-badge mode-testnet">🧪 TESTNET</span></div>
+          <div class="step-desc">Places <strong>real orders on Bybit Testnet</strong> using fake money. Requires a separate Bybit Testnet account and API key. Useful for testing order execution flow and Telegram alerts. Testnet prices are separate from real markets and behave differently.</div>
+        </div>
+      </div>
+      <div class="step">
+        <div class="step-circle" style="background:var(--rdim);border-color:#3a1020;">🔴</div>
+        <div class="step-content">
+          <div class="step-title"><span class="mode-badge mode-live">🔴 LIVE</span></div>
+          <div class="step-desc">Places <strong>real orders with real money</strong> on your live Bybit account. Only switch to this mode after you have run paper mode for at least 2 weeks, reviewed all trade history in Google Sheets, and are satisfied with the signal quality.</div>
+        </div>
+      </div>
+    </div>
+  </div>
+
+  <div class="alert alert-red"><strong>Progression rule:</strong> Paper → Testnet → Live. Never skip steps. The daily loss limit (5%) and 2% per trade risk rule apply in all modes.</div>
+</section>
+
+<!-- ════════════════════════════════════════ GOOGLE SHEETS -->
+<section class="section" id="sheets">
+  <div class="section-header"><span class="section-num">07</span><span class="section-title">Google Sheets Setup</span></div>
+  <p>Render's free tier has no persistent disk. Without Google Sheets, all open trades are lost every time the bot restarts or redeploys. Google Sheets stores your active trades and bot state (pause/resume) so everything recovers automatically.</p>
+
+  <div class="steps">
+    <div class="step">
+      <div class="step-circle">1</div>
+      <div class="step-content">
+        <div class="step-title">Create a Google Cloud project</div>
+        <div class="step-desc">Go to <strong>console.cloud.google.com</strong> → New Project → name it anything (e.g. <code>trading-bot</code>) → Create.</div>
+      </div>
+    </div>
+    <div class="step">
+      <div class="step-circle">2</div>
+      <div class="step-content">
+        <div class="step-title">Enable the Google Sheets API</div>
+        <div class="step-desc">In your project → APIs & Services → Library → search <strong>Google Sheets API</strong> → Enable. Also enable <strong>Google Drive API</strong>.</div>
+      </div>
+    </div>
+    <div class="step">
+      <div class="step-circle">3</div>
+      <div class="step-content">
+        <div class="step-title">Create a service account</div>
+        <div class="step-desc">APIs & Services → Credentials → Create Credentials → <strong>Service Account</strong> → give it a name → Create. On the next screen, skip role assignment → Done.</div>
+      </div>
+    </div>
+    <div class="step">
+      <div class="step-circle">4</div>
+      <div class="step-content">
+        <div class="step-title">Download the JSON key</div>
+        <div class="step-desc">Click on your new service account → Keys tab → Add Key → Create new key → <strong>JSON</strong> → Download. Open the file — it looks like a large JSON object starting with <code>{"type": "service_account"...</code></div>
+      </div>
+    </div>
+    <div class="step">
+      <div class="step-circle">5</div>
+      <div class="step-content">
+        <div class="step-title">Create the Google Sheet</div>
+        <div class="step-desc">Go to <strong>sheets.google.com</strong> → create a new blank spreadsheet → name it exactly <strong>Antigravity Trades</strong> (or whatever you set in <code>GOOGLE_SHEET_NAME</code>).</div>
+      </div>
+    </div>
+    <div class="step">
+      <div class="step-circle">6</div>
+      <div class="step-content">
+        <div class="step-title">Share the sheet with your service account</div>
+        <div class="step-desc">In your Google Sheet → Share → paste the service account email (it looks like <code>trading-bot@trading-bot-12345.iam.gserviceaccount.com</code>) → set role to <strong>Editor</strong> → Share.</div>
+      </div>
+    </div>
+    <div class="step">
+      <div class="step-circle">7</div>
+      <div class="step-content">
+        <div class="step-title">Paste JSON into Render</div>
+        <div class="step-desc">Open the downloaded JSON file → select all content → copy → go to Render → Environment → <strong>GOOGLE_SHEETS_CREDENTIALS</strong> → paste the entire JSON as the value → Save.</div>
+      </div>
+    </div>
+  </div>
+</section>
+
+<!-- ════════════════════════════════════════ UPTIMEROBOT -->
+<section class="section" id="uptime">
+  <div class="section-header"><span class="section-num">08</span><span class="section-title">UptimeRobot Keep-Alive</span></div>
+  <p>Render free tier spins down services that receive no traffic for 15 minutes. UptimeRobot pings your bot every 5 minutes to keep it running. This is <strong>essential</strong> — without it the bot will stop trading.</p>
+
+  <div class="steps">
+    <div class="step">
+      <div class="step-circle">1</div>
+      <div class="step-content">
+        <div class="step-title">Sign up at uptimerobot.com</div>
+        <div class="step-desc">Free account — no credit card needed. Supports up to 50 monitors on the free plan.</div>
+      </div>
+    </div>
+    <div class="step">
+      <div class="step-circle">2</div>
+      <div class="step-content">
+        <div class="step-title">Add a new monitor</div>
+        <div class="step-desc">Click <strong>Add New Monitor</strong> → Monitor Type: <strong>HTTP(s)</strong> → Friendly Name: <code>Antigravity Bot</code> → URL: <code>https://YOUR-SERVICE-NAME.onrender.com/ping</code></div>
+      </div>
+    </div>
+    <div class="step">
+      <div class="step-circle">3</div>
+      <div class="step-content">
+        <div class="step-title">Set interval to 5 minutes</div>
+        <div class="step-desc">Monitoring Interval: <strong>5 minutes</strong> → Create Monitor. UptimeRobot will now ping <code>/ping</code> every 5 minutes. Your bot responds with <code>OK</code> and stays awake.</div>
+      </div>
+    </div>
+  </div>
+
+  <div class="alert alert-green">Once UptimeRobot is set up, visit <code>https://YOUR-BOT.onrender.com/status</code> in your browser to see a live JSON status of the bot including mode, active trades, and uptime.</div>
+</section>
+
+<!-- ════════════════════════════════════════ TELEGRAM SETUP -->
+<section class="section" id="telegram">
+  <div class="section-header"><span class="section-num">09</span><span class="section-title">Telegram Bot Setup</span></div>
+
+  <div class="steps">
+    <div class="step">
+      <div class="step-circle">1</div>
+      <div class="step-content">
+        <div class="step-title">Create your bot with @BotFather</div>
+        <div class="step-desc">Open Telegram → search <strong>@BotFather</strong> → tap Start → send <code>/newbot</code> → follow the prompts → give your bot a name and username (must end in <code>bot</code>, e.g. <code>antigravity_trading_bot</code>) → BotFather sends you a token like <code>7123456789:AAH_xyz...</code> — save this.</div>
+      </div>
+    </div>
+    <div class="step">
+      <div class="step-circle">2</div>
+      <div class="step-content">
+        <div class="step-title">Get your Chat ID</div>
+        <div class="step-desc">Search <strong>@userinfobot</strong> → tap Start → it replies with your ID number. Copy it. This tells the bot which Telegram account to send messages to.</div>
+      </div>
+    </div>
+    <div class="step">
+      <div class="step-circle">3</div>
+      <div class="step-content">
+        <div class="step-title">Start your bot</div>
+        <div class="step-desc">Search for your bot by username in Telegram → tap <strong>Start</strong>. This is required before the bot can send you messages. You only need to do this once.</div>
+      </div>
+    </div>
+    <div class="step">
+      <div class="step-circle">4</div>
+      <div class="step-content">
+        <div class="step-title">Add credentials to Render</div>
+        <div class="step-desc">Add <code>TELEGRAM_TOKEN</code> and <code>TELEGRAM_CHAT_ID</code> to your Render environment variables. After the bot deploys you should receive a startup message within 60 seconds.</div>
+      </div>
+    </div>
+  </div>
+</section>
+
+<!-- ════════════════════════════════════════ COMMANDS -->
+<section class="section" id="commands">
+  <div class="section-header"><span class="section-num">10</span><span class="section-title">Telegram Commands</span></div>
+  <p>All bot control happens from Telegram. When you open your bot, you will see a keyboard with buttons at the bottom of the screen. Tap any button to send a command.</p>
+
+  <div class="btn-grid">
+    <div class="btn-card">
+      <div class="btn-label">📊 Status</div>
+      <div class="btn-desc">Shows current bot status (active/paused), USDT balance, trading mode, and number of open trades.</div>
+    </div>
+    <div class="btn-card">
+      <div class="btn-label">💰 Balance</div>
+      <div class="btn-desc">Fetches your live USDT balance directly from Bybit API. Useful for confirming the bot can see your account.</div>
+    </div>
+    <div class="btn-card">
+      <div class="btn-label">📈 Open Trades</div>
+      <div class="btn-desc">Lists all currently open positions with entry price, current price, stop loss, take profit, and unrealised P&L percentage.</div>
+    </div>
+    <div class="btn-card">
+      <div class="btn-label">📅 Profit Report</div>
+      <div class="btn-desc">Reads your trade log and shows total trades, number closed, win rate, and total P&L in USDT.</div>
+    </div>
+    <div class="btn-card">
+      <div class="btn-label">🔍 Scan Setups</div>
+      <div class="btn-desc">Manually triggers an immediate full scan of all 25 pairs. Useful when you think market conditions have changed and want to check right now.</div>
+    </div>
+    <div class="btn-card">
+      <div class="btn-label">🛑 Pause Bot</div>
+      <div class="btn-desc">Stops the bot from opening any new trades. Existing open trades are still monitored and will close at SL/TP. Use this before news events or when you want manual control.</div>
+    </div>
+    <div class="btn-card">
+      <div class="btn-label">🚀 Resume Bot</div>
+      <div class="btn-desc">Resumes scanning for new setups after pausing. Pause state persists through Render restarts via Google Sheets — resuming also saves to Sheets.</div>
+    </div>
+    <div class="btn-card">
+      <div class="btn-label">❓ Help</div>
+      <div class="btn-desc">Shows a summary of all available commands and what each one does.</div>
+    </div>
+  </div>
+
+  <div class="alert alert-amber"><strong>Pause before major news.</strong> High-impact events (Fed decisions, CPI, major crypto news) can cause violent price moves that trigger false signals. Tap 🛑 Pause Bot before such events and 🚀 Resume Bot after the market stabilises.</div>
+</section>
+
+<!-- ════════════════════════════════════════ ALERTS -->
+<section class="section" id="alerts">
+  <div class="section-header"><span class="section-num">11</span><span class="section-title">Telegram Alert Types</span></div>
+  <p>The bot sends you Telegram messages automatically. Here is what each one means and what action to take.</p>
+
+  <div class="steps">
+    <div class="step">
+      <div class="step-circle" style="font-size:16px;background:none;border:none;">🟢</div>
+      <div class="step-content">
+        <div class="step-title">Bot Started on Render</div>
+        <div class="step-desc">Sent every time the bot starts or redeploys. Shows mode, number of pairs being scanned, and whether Google Sheets is connected. <strong>No action needed.</strong> If you see this unexpectedly it means Render restarted the service.</div>
+      </div>
+    </div>
+    <div class="step">
+      <div class="step-circle" style="font-size:16px;background:none;border:none;">🔄</div>
+      <div class="step-content">
+        <div class="step-title">Bot Restarted — Recovered N trade(s)</div>
+        <div class="step-desc">Bot restarted after a crash or redeploy and found open trades in Google Sheets. Lists each recovered trade with its entry, SL, and TP. <strong>No action needed</strong> — monitoring resumes automatically.</div>
+      </div>
+    </div>
+    <div class="step">
+      <div class="step-circle" style="font-size:16px;background:none;border:none;">⏳</div>
+      <div class="step-content">
+        <div class="step-title">Potential Setup: [PAIR]</div>
+        <div class="step-desc">The bot identified a setup approaching a valid entry zone but conditions are not fully met yet. Shows the potential entry, SL, and TP levels. <strong>Informational only</strong> — no order placed. You can watch this pair manually.</div>
+      </div>
+    </div>
+    <div class="step">
+      <div class="step-circle" style="font-size:16px;background:none;border:none;">🚀</div>
+      <div class="step-content">
+        <div class="step-title">Trade Entry: [PAIR]</div>
+        <div class="step-desc">A buy order was placed on Bybit. Shows pair, quantity, entry price, stop loss, and take profit. <strong>Review the trade details.</strong> If you disagree with the trade, tap 📈 Open Trades to see it, then you can decide whether to close it manually on Bybit.</div>
+      </div>
+    </div>
+    <div class="step">
+      <div class="step-circle" style="font-size:16px;background:none;border:none;">🛡️</div>
+      <div class="step-content">
+        <div class="step-title">Break-Even Shield: [PAIR]</div>
+        <div class="step-desc">The trade moved 1.5%+ in profit so the stop loss was automatically moved up to the entry price. The trade is now <strong>risk-free</strong> — worst case is a zero loss. <strong>No action needed.</strong></div>
+      </div>
+    </div>
+    <div class="step">
+      <div class="step-circle" style="font-size:16px;background:none;border:none;">✅</div>
+      <div class="step-content">
+        <div class="step-title">Take Profit Hit: [PAIR]</div>
+        <div class="step-desc">Trade closed at the take profit level. Shows exit price and profit percentage. <strong>No action needed.</strong> Trade is logged to Google Sheets and trades.csv automatically.</div>
+      </div>
+    </div>
+    <div class="step">
+      <div class="step-circle" style="font-size:16px;background:none;border:none;">🛑</div>
+      <div class="step-content">
+        <div class="step-title">Stop Loss Hit: [PAIR]</div>
+        <div class="step-desc">Trade closed at the stop loss. Loss is within the 2% risk rule. <strong>No action needed</strong> — losses are a normal part of trading. Review the trade in Google Sheets to learn from it.</div>
+      </div>
+    </div>
+    <div class="step">
+      <div class="step-circle" style="font-size:16px;background:none;border:none;">🛑</div>
+      <div class="step-content">
+        <div class="step-title">Daily Loss Limit Hit</div>
+        <div class="step-desc">The bot lost 5% of your balance in one day. Trading is <strong>automatically halted</strong> for the rest of the day. The bot resumes scanning the next day. If you want to resume early, tap 🚀 Resume Bot (use with caution).</div>
+      </div>
+    </div>
+    <div class="step">
+      <div class="step-circle" style="font-size:16px;background:none;border:none;">⚠️</div>
+      <div class="step-content">
+        <div class="step-title">Balance is $0 or unreadable</div>
+        <div class="step-desc">The bot cannot read your Bybit balance. <strong>Action required:</strong> check your API key permissions in Bybit (needs Read + Spot Trade), verify the key is not expired, and confirm there is USDT in your spot wallet.</div>
+      </div>
+    </div>
+    <div class="step">
+      <div class="step-circle" style="font-size:16px;background:none;border:none;">⚠️</div>
+      <div class="step-content">
+        <div class="step-title">Bot Error</div>
+        <div class="step-desc">An unexpected error occurred. The message includes the error details. <strong>Check Render logs</strong> (your service → Logs tab) for the full stack trace. The bot will automatically retry after 60 seconds.</div>
+      </div>
+    </div>
+  </div>
+</section>
+
+<!-- ════════════════════════════════════════ MONITORING -->
+<section class="section" id="monitoring">
+  <div class="section-header"><span class="section-num">12</span><span class="section-title">Monitoring the Bot</span></div>
+
+  <div class="subsection">
+    <div class="subsection-title">Health endpoints</div>
+    <table class="env-table">
+      <thead><tr><th>URL</th><th>Returns</th><th>Use for</th></tr></thead>
+      <tbody>
+        <tr><td><span class="env-key">/ping</span></td><td class="env-desc"><code>OK</code></td><td class="env-desc">UptimeRobot keep-alive ping</td></tr>
+        <tr><td><span class="env-key">/status</span></td><td class="env-desc">JSON object</td><td class="env-desc">Manual check of bot health in browser</td></tr>
+      </tbody>
+    </table>
+    <div class="code-block">
+      <div class="code-header"><span>Example /status response</span></div>
+      <div class="code-body">{
+  <span class="s">"bot"</span>:           <span class="v">"Antigravity SMC"</span>,
+  <span class="s">"mode"</span>:          <span class="v">"paper"</span>,
+  <span class="s">"status"</span>:        <span class="v">"running"</span>,
+  <span class="s">"active_trades"</span>: <span class="v">1</span>,
+  <span class="s">"pairs"</span>:         <span class="v">25</span>,
+  <span class="s">"uptime_sec"</span>:    <span class="v">86400</span>
+}</div>
+    </div>
+  </div>
+
+  <div class="subsection">
+    <div class="subsection-title">Reading Render logs</div>
+    <p>Go to <strong>render.com</strong> → your service → <strong>Logs</strong> tab. Each scan cycle prints a line like:</p>
+    <div class="code-block">
+      <div class="code-body"><span class="c">[Loop] Scan done. Active trades: 1. Sleeping 5m...</span>
+<span class="c">[Balance] $38.20 USDT</span>
+<span class="c">[Sheets] Connected to 'Antigravity Trades'</span>
+<span class="c">[Health] Server on port 10000</span></div>
+    </div>
+    <p>If you see <code>[Loop] Error:</code> lines, the error message will tell you what went wrong. Most errors are temporary network issues and the bot recovers automatically.</p>
+  </div>
+
+  <div class="subsection">
+    <div class="subsection-title">Google Sheets columns</div>
+    <table class="env-table">
+      <thead><tr><th>Column</th><th>Meaning</th></tr></thead>
+      <tbody>
+        <tr><td class="env-key">timestamp</td><td class="env-desc">When the trade was opened</td></tr>
+        <tr><td class="env-key">symbol</td><td class="env-desc">Trading pair e.g. SOLUSDT</td></tr>
+        <tr><td class="env-key">entry</td><td class="env-desc">Entry price at the time of the order</td></tr>
+        <tr><td class="env-key">sl</td><td class="env-desc">Stop loss price</td></tr>
+        <tr><td class="env-key">tp</td><td class="env-desc">Take profit price</td></tr>
+        <tr><td class="env-key">status</td><td class="env-desc">OPEN or CLOSED</td></tr>
+        <tr><td class="env-key">exit_price</td><td class="env-desc">Price at which the trade closed</td></tr>
+        <tr><td class="env-key">pnl_usd</td><td class="env-desc">Profit or loss in USDT</td></tr>
+        <tr><td class="env-key">pnl_pct</td><td class="env-desc">Profit or loss as a percentage</td></tr>
+      </tbody>
+    </table>
+  </div>
+</section>
+
+<hr/>
+
+<!-- ════════════════════════════════════════ STRATEGY -->
+<section class="section" id="strategy">
+  <div class="section-header"><span class="section-num">13</span><span class="section-title">How the Strategy Works</span></div>
+  <p>The bot uses a <strong>Triple Screen</strong> analysis — three timeframes must align before any trade is taken. This reduces false signals significantly.</p>
+
+  <div class="flow">
+    <div class="flow-item">
+      <div class="flow-line"><div class="flow-dot"></div><div class="flow-connector"></div></div>
+      <div class="flow-content">
+        <div class="flow-title">Screen 1 — Daily Trend Filter</div>
+        <div class="flow-desc">Price must be above the 200-day moving average on the daily chart. If the macro trend is bearish, no buys are taken regardless of shorter timeframe signals.</div>
+      </div>
+    </div>
+    <div class="flow-item">
+      <div class="flow-line"><div class="flow-dot"></div><div class="flow-connector"></div></div>
+      <div class="flow-content">
+        <div class="flow-title">Screen 2 — 4H Trend Confirmation</div>
+        <div class="flow-desc">The 50-period MA must be above the 200-period MA on the 4H chart (Golden Cross structure). Both MAs need at least 200 candles of history — if data is insufficient, the signal is skipped.</div>
+      </div>
+    </div>
+    <div class="flow-item">
+      <div class="flow-line"><div class="flow-dot"></div><div class="flow-connector"></div></div>
+      <div class="flow-content">
+        <div class="flow-title">Screen 3 — 1H Entry Signals</div>
+        <div class="flow-desc">Three conditions must all be true on the 1H chart: (1) price is at or near a Bullish Order Block — the last bearish candle before an impulsive bullish move, (2) a Fair Value Gap exists nearby confirming imbalance, (3) volume is at least 1.2× the 20-candle average.</div>
+      </div>
+    </div>
+    <div class="flow-item">
+      <div class="flow-line"><div class="flow-dot"></div><div class="flow-connector"></div></div>
+      <div class="flow-content">
+        <div class="flow-title">Entry Execution</div>
+        <div class="flow-desc">A market buy order is placed. Stop loss is set at the lowest wick of the last 10 closed candles. Take profit is set at 2× the risk distance (1:2 reward-to-risk minimum).</div>
+      </div>
+    </div>
+    <div class="flow-item">
+      <div class="flow-line"><div class="flow-dot"></div><div class="flow-connector"></div></div>
+      <div class="flow-content">
+        <div class="flow-title">Break-Even Shield</div>
+        <div class="flow-desc">Once the trade moves 1.5% in profit, the stop loss is automatically moved to the entry price. The trade becomes risk-free — the worst outcome is breaking even.</div>
+      </div>
+    </div>
+    <div class="flow-item">
+      <div class="flow-line"><div class="flow-dot"></div></div>
+      <div class="flow-content">
+        <div class="flow-title">Exit</div>
+        <div class="flow-desc">Automatic exit at stop loss (loss capped at 2% of capital) or take profit (minimum 4% gain). All exits are logged to Google Sheets and trades.csv.</div>
+      </div>
+    </div>
+  </div>
+
+  <div class="alert alert-blue"><strong>Important detail:</strong> All signals are evaluated on the last <strong>closed</strong> candle only — never the live, still-forming candle. This prevents false signals from incomplete candle data.</div>
+</section>
+
+<!-- ════════════════════════════════════════ RISK -->
+<section class="section" id="risk">
+  <div class="section-header"><span class="section-num">14</span><span class="section-title">Risk Management Rules</span></div>
+
+  <div class="info-grid">
+    <div class="info-card"><div class="info-card-title">RISK PER TRADE</div><div class="info-card-val">2%</div><div class="info-card-sub">Max capital at risk on any single trade. Automatically calculated from your balance.</div></div>
+    <div class="info-card"><div class="info-card-title">MAX POSITION SIZE</div><div class="info-card-val">40%</div><div class="info-card-sub">A single position can never exceed 40% of your balance regardless of SL distance.</div></div>
+    <div class="info-card"><div class="info-card-title">MIN REWARD:RISK</div><div class="info-card-val">1:2</div><div class="info-card-sub">Take profit is always set at minimum 2× the stop loss distance.</div></div>
+    <div class="info-card"><div class="info-card-title">MAX OPEN TRADES</div><div class="info-card-val">2</div><div class="info-card-sub">Bot never opens more than 2 trades simultaneously.</div></div>
+    <div class="info-card"><div class="info-card-title">DAILY LOSS LIMIT</div><div class="info-card-val">5%</div><div class="info-card-sub">If total losses reach 5% of balance in one day, bot halts until midnight.</div></div>
+    <div class="info-card"><div class="info-card-title">BREAK-EVEN AT</div><div class="info-card-val">+1.5%</div><div class="info-card-sub">Stop loss moves to entry price once trade is 1.5% in profit.</div></div>
+  </div>
+
+  <p>These values are hardcoded in <code>config.py</code>. To change them, edit <code>config.py</code>, commit, and push to GitHub. Render will redeploy automatically.</p>
+</section>
+
+<!-- ════════════════════════════════════════ SHARIA -->
+<section class="section" id="sharia">
+  <div class="section-header"><span class="section-num">15</span><span class="section-title">Sharia Compliance Filter</span></div>
+  <p>Every pair is checked against the whitelist in <code>config.py</code> before any trade is placed. The bot will <strong>never trade a pair not on this list</strong>, regardless of any signal.</p>
+
+  <p>The 25 default pairs were selected based on the Islamic Finance screening criteria from Chapter 5 of your reference document: each must qualify as <strong>Māl</strong> (genuine utility, retrievable, desirable), must have <strong>Taqawwum</strong> (lawful use case), and must not be primarily associated with riba-based finance, gambling, or haram industries.</p>
+
+  <div class="subsection">
+    <div class="subsection-title">Adding or removing pairs</div>
+    <p>Open <code>config.py</code> and edit the <code>WHITELIST_PAIRS</code> list. Before adding any new coin:</p>
+    <div class="steps">
+      <div class="step">
+        <div class="step-circle">1</div>
+        <div class="step-content">
+          <div class="step-title">Research the coin's utility</div>
+          <div class="step-desc">What does it actually do? Does it have genuine real-world utility beyond price speculation? Does it qualify as Māl under the criteria in your reference document?</div>
+        </div>
+      </div>
+      <div class="step">
+        <div class="step-circle">2</div>
+        <div class="step-content">
+          <div class="step-title">Check the business activity</div>
+          <div class="step-desc">Is the project's core activity Sharia-compliant? Lending/borrowing protocols (like AAVE, Compound) are questionable due to riba. Gambling or gaming tokens are prohibited.</div>
+        </div>
+      </div>
+      <div class="step">
+        <div class="step-circle">3</div>
+        <div class="step-content">
+          <div class="step-title">Consult a qualified scholar if unsure</div>
+          <div class="step-desc">For significant amounts, consult a qualified Islamic finance scholar before trading a new coin. The bot enforces whatever is on your list — the screening responsibility is yours.</div>
+        </div>
+      </div>
+    </div>
+  </div>
+</section>
+
+<hr/>
+
+<!-- ════════════════════════════════════════ PROGRESSION -->
+<section class="section" id="progression">
+  <div class="section-header"><span class="section-num">16</span><span class="section-title">Recommended Progression Plan</span></div>
+
+  <div class="steps">
+    <div class="step">
+      <div class="step-circle">W1</div>
+      <div class="step-content">
+        <div class="step-title">Week 1–2 — Paper mode</div>
+        <div class="step-desc">Run in <code>paper</code> mode. <strong>Read every single Telegram signal.</strong> After each potential setup or trade entry alert, open Bybit and look at that chart yourself. Ask: does this signal make sense? Is it near a real support zone? Does it match your SMC knowledge? Build familiarity with how the bot thinks.</div>
+      </div>
+    </div>
+    <div class="step">
+      <div class="step-circle">W3</div>
+      <div class="step-content">
+        <div class="step-title">Week 3–4 — Review paper results</div>
+        <div class="step-desc">Open your Google Sheet. Review every trade taken in paper mode. Calculate the actual win rate, average profit, average loss. If the results look reasonable (40%+ win rate, positive overall P&L) — consider moving to testnet. If not, stay in paper and investigate why signals are wrong.</div>
+      </div>
+    </div>
+    <div class="step">
+      <div class="step-circle">M2</div>
+      <div class="step-content">
+        <div class="step-title">Month 2 — Testnet</div>
+        <div class="step-desc">Switch <code>MODE</code> to <code>testnet</code> in Render env vars. Create a Bybit Testnet account at <strong>testnet.bybit.com</strong> and generate separate API keys. Run for 2 more weeks. Verify that order placement, SL/TP execution, and Telegram alerts all work correctly end-to-end.</div>
+      </div>
+    </div>
+    <div class="step">
+      <div class="step-circle">M3</div>
+      <div class="step-content">
+        <div class="step-title">Month 3 — Live with small capital</div>
+        <div class="step-desc">Switch <code>MODE</code> to <code>live</code>. Start with your current $40–$50. The 2% risk rule means each trade risks $0.80–$1.00. This is the right size to learn on. <strong>Do not add more capital until you have 30+ live trades logged and are satisfied with the results.</strong></div>
+      </div>
+    </div>
+    <div class="step">
+      <div class="step-circle">M4+</div>
+      <div class="step-content">
+        <div class="step-title">Month 4+ — Scale gradually</div>
+        <div class="step-desc">Only increase capital after consistent profitability. The bot's risk rules scale automatically with your balance — 2% of $200 is $4 per trade, 2% of $1000 is $20 per trade. Never deposit more than you can afford to lose entirely.</div>
+      </div>
+    </div>
+  </div>
+</section>
+
+<!-- ════════════════════════════════════════ TROUBLESHOOT -->
+<section class="section" id="troubleshoot">
+  <div class="section-header"><span class="section-num">17</span><span class="section-title">Troubleshooting</span></div>
+
+  <div class="subsection">
+    <div class="subsection-title">Bot deployed but no Telegram message received</div>
+    <p>Check: <strong>(1)</strong> Is <code>TELEGRAM_TOKEN</code> correct in Render env vars? <strong>(2)</strong> Did you tap Start on your bot in Telegram? <strong>(3)</strong> Is <code>TELEGRAM_CHAT_ID</code> your correct numeric ID? Check Render logs for <code>[Telegram] send error:</code> lines.</p>
+  </div>
+
+  <div class="subsection">
+    <div class="subsection-title">Balance shows $0 in Status</div>
+    <p>The API key cannot read your balance. Check: <strong>(1)</strong> API key has Read permission enabled in Bybit. <strong>(2)</strong> You copied the correct key and secret — no extra spaces. <strong>(3)</strong> If on testnet, are you using testnet API keys with <code>MODE=testnet</code>? Live keys do not work on testnet and vice versa.</p>
+  </div>
+
+  <div class="subsection">
+    <div class="subsection-title">Bot stops scanning after a few hours</div>
+    <p>UptimeRobot is not configured or the ping URL is wrong. Check that UptimeRobot is actively monitoring <code>https://YOUR-BOT.onrender.com/ping</code> with a 5-minute interval and showing as UP (green). Also check the Render logs for any crash errors.</p>
+  </div>
+
+  <div class="subsection">
+    <div class="subsection-title">Google Sheets not connecting</div>
+    <p>Check: <strong>(1)</strong> The entire JSON content of the service account key is pasted as <code>GOOGLE_SHEETS_CREDENTIALS</code> — no truncation. <strong>(2)</strong> The sheet name exactly matches <code>GOOGLE_SHEET_NAME</code>. <strong>(3)</strong> The sheet is shared with the service account email as Editor. Render logs will show <code>[Sheets] Connection failed:</code> with the specific error.</p>
+  </div>
+
+  <div class="subsection">
+    <div class="subsection-title">Profit Report says "No trade history yet"</div>
+    <p>The bot has not placed any trades yet (normal in early paper mode), or you are in paper mode and no signals have fired. Alternatively, check Render logs for <code>TradeLogger</code> errors. The trade log file is at <code>logs/trades.csv</code> inside the container.</p>
+  </div>
+
+  <div class="subsection">
+    <div class="subsection-title">Daily loss limit triggered unexpectedly</div>
+    <p>The 5% daily loss limit resets at midnight UTC. If it triggered, the bot will automatically resume the next day. To resume manually before midnight, tap <strong>🚀 Resume Bot</strong> in Telegram — but only do this if you have investigated why the losses occurred.</p>
+  </div>
+</section>
+
+<!-- ════════════════════════════════════════ SECURITY -->
+<section class="section" id="security">
+  <div class="section-header"><span class="section-num">18</span><span class="section-title">Security Rules</span></div>
+
+  <div class="alert alert-red"><strong>These rules are non-negotiable. Violating any of them can result in loss of your entire Bybit balance.</strong></div>
+
+  <div class="steps">
+    <div class="step">
+      <div class="step-circle">🔒</div>
+      <div class="step-content">
+        <div class="step-title">Never enable withdrawal permissions on your API key</div>
+        <div class="step-desc">Your Bybit API key needs only <strong>Read</strong> and <strong>Spot Trade</strong>. Never tick the withdrawal box. Even if someone steals your key, they cannot withdraw funds without withdrawal permission enabled.</div>
+      </div>
+    </div>
+    <div class="step">
+      <div class="step-circle">🔒</div>
+      <div class="step-content">
+        <div class="step-title">Never commit secrets to GitHub</div>
+        <div class="step-desc">The <code>.gitignore</code> excludes <code>.env</code> files. But always double-check <code>config.py</code> before every push. All values should be <code>os.environ.get(...)</code> — never actual key strings.</div>
+      </div>
+    </div>
+    <div class="step">
+      <div class="step-circle">🔒</div>
+      <div class="step-content">
+        <div class="step-title">Set IP restriction on your Bybit API key</div>
+        <div class="step-desc">In Bybit → API Management → your key → set IP restriction to your Render service's outbound IPs. Render outbound IPs are listed in your service's settings. This prevents the key working from any other IP.</div>
+      </div>
+    </div>
+    <div class="step">
+      <div class="step-circle">🔒</div>
+      <div class="step-content">
+        <div class="step-title">Keep your GitHub repo private</div>
+        <div class="step-desc">Even without hardcoded secrets, a public repo exposes your strategy logic, pair whitelist, and risk settings. Keep the repo private at all times.</div>
+      </div>
+    </div>
+    <div class="step">
+      <div class="step-circle">🔒</div>
+      <div class="step-content">
+        <div class="step-title">Rotate API keys periodically</div>
+        <div class="step-desc">Every 3 months, generate new Bybit API keys, update them in Render env vars, and delete the old ones in Bybit. Update your Telegram bot token if you suspect it was compromised.</div>
+      </div>
+    </div>
+  </div>
+</section>
+
+<!-- ════════════════════════════════════════ FILE REFERENCE -->
+<section class="section" id="files">
+  <div class="section-header"><span class="section-num">19</span><span class="section-title">File Reference</span></div>
+
+  <table class="env-table">
+    <thead><tr><th>File</th><th>Purpose</th></tr></thead>
+    <tbody>
+      <tr><td><span class="env-key">main.py</span></td><td class="env-desc">Entry point. Flask health server + main async trading loop. Handles crash recovery, daily loss limit, trade monitoring, scan loop.</td></tr>
+      <tr><td><span class="env-key">config.py</span></td><td class="env-desc">All settings. Reads from environment variables. Never contains real secrets.</td></tr>
+      <tr><td><span class="env-key">requirements.txt</span></td><td class="env-desc">Python dependencies. Render installs these during build.</td></tr>
+      <tr><td><span class="env-key">Procfile</span></td><td class="env-desc">Tells Render the start command: <code>python main.py</code></td></tr>
+      <tr><td><span class="env-key">exchange/bybit_client.py</span></td><td class="env-desc">All Bybit V5 API communication. Balance, candles, order placement, precision handling.</td></tr>
+      <tr><td><span class="env-key">strategy/brain.py</span></td><td class="env-desc">Triple Screen analysis. Order Block detection, FVG detection, MA trend filters. All signals on closed candles only.</td></tr>
+      <tr><td><span class="env-key">risk/manager.py</span></td><td class="env-desc">Position sizing (2% rule, 40% cap), daily loss tracking, daily halt logic.</td></tr>
+      <tr><td><span class="env-key">notifications/notifier.py</span></td><td class="env-desc">All Telegram message sending. Fully async.</td></tr>
+      <tr><td><span class="env-key">notifications/command_handler.py</span></td><td class="env-desc">Telegram button handling. Status, balance, open trades, profit report, pause/resume.</td></tr>
+      <tr><td><span class="env-key">safety/sharia_filter.py</span></td><td class="env-desc">Checks every pair against WHITELIST_PAIRS before any trade.</td></tr>
+      <tr><td><span class="env-key">storage/google_sheets.py</span></td><td class="env-desc">Google Sheets persistence. Trade open/close logging, crash recovery, pause state storage.</td></tr>
+      <tr><td><span class="env-key">logger/trade_logger.py</span></td><td class="env-desc">Local CSV trade log at <code>logs/trades.csv</code>. Backup for Profit Report.</td></tr>
+      <tr><td><span class="env-key">logs/trades.csv</span></td><td class="env-desc">Local trade history. Created automatically. Lost on Render restart — Google Sheets is the persistent backup.</td></tr>
+    </tbody>
+  </table>
+</section>
+
+<footer>
+  Antigravity SMC Bot — User Manual v3 — All 13 bugs fixed — Ready for Render deployment
+</footer>
+
+</main>
+</div>
+
+<script>
+function scrollTo(id) {
+  document.getElementById(id).scrollIntoView({ behavior: 'smooth' });
+  document.querySelectorAll('.nav-link').forEach(l => l.classList.remove('active'));
+  event.currentTarget.classList.add('active');
+}
+window.addEventListener('scroll', () => {
+  const sections = document.querySelectorAll('.section');
+  const links    = document.querySelectorAll('.nav-link');
+  let current    = '';
+  sections.forEach(s => {
+    if (window.scrollY >= s.offsetTop - 120) current = s.id;
+  });
+  links.forEach(l => {
+    l.classList.toggle(
+      'active',
+      l.getAttribute('onclick') && l.getAttribute('onclick').includes(`'${current}'`)
+    );
+  });
+});
+</script>
+</body>
+</html>
