@@ -1,12 +1,12 @@
 # ============================================================
-#  main.py — Render-ready. corrections_v2 applied.
+#  main.py — Render-ready. corrections_v3 applied.
 #
-#  New in this version:
-#  - Sheet cross-reference on startup (Step A-D from doc)
-#  - Fee-aware trade close (net profit logged to Sheets + CSV)
-#  - smc_signal string passed through to sheet
-#  - Balance alert if unreadable
-#  - Honest status: shows daily loss limit setting
+#  v3 fixes:
+#  - Sheets auth: oauth2client → gspread.service_account_from_dict
+#  - requirements.txt: oauth2client → google-auth>=2.0.0
+#  - Balance: enhanced per-account-type debug logging in Render
+#  - TelegramCommandHandler import moved to module top (SKILL.md rule)
+#  - Version banner updated to v3
 # ============================================================
 import time
 import asyncio
@@ -23,6 +23,7 @@ from notifications.notifier      import TelegramNotifier
 from safety.sharia_filter        import ShariaFilter
 from logger.trade_logger         import TradeLogger
 from storage.google_sheets       import GoogleSheetsStorage
+from notifications.command_handler import TelegramCommandHandler
 
 # ── Health server ─────────────────────────────────────────────
 health_app  = Flask(__name__)
@@ -64,7 +65,7 @@ print(f"[Health] Server on port {os.environ.get('PORT', 8080)}")
 # ── Main async bot ────────────────────────────────────────────
 async def main():
     print("=" * 54)
-    print("  ANTIGRAVITY SMC BOT — Render + corrections_v2")
+    print("  ANTIGRAVITY SMC BOT — Render + corrections_v3")
     print("=" * 54)
 
     bybit    = BybitClient()
@@ -78,7 +79,6 @@ async def main():
     _bot_status["sheets"] = "connected" if storage.is_connected else "not configured"
 
     # ── Telegram command handler ──────────────────────────────
-    from notifications.command_handler import TelegramCommandHandler
     cmd_handler = TelegramCommandHandler(
         notifier=notifier,
         bybit=bybit,

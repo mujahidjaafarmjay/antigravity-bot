@@ -4,5 +4,5 @@ pandas
 numpy
 flask
 gspread>=6.0.0
-oauth2client>=4.1.3
+google-auth>=2.0.0
 python-dotenv

@@ -70,24 +70,17 @@ class GoogleSheetsStorage:
             return
         try:
             import gspread
-            from oauth2client.service_account import ServiceAccountCredentials
-
-            scope = [
-                "https://spreadsheets.google.com/feeds",
-                "https://www.googleapis.com/auth/drive",
-            ]
 
             creds_dict = json.loads(creds_json)
-            # Fix: escaped newlines in private_key when pasted into Render
+
+            # Fix v3: escaped newlines in private_key when pasted into Render env var
             if "private_key" in creds_dict:
                 creds_dict["private_key"] = (
                     creds_dict["private_key"].replace("\\n", "\n")
                 )
 
-            creds       = ServiceAccountCredentials.from_json_keyfile_dict(
-                creds_dict, scope
-            )
-            self.client = gspread.authorize(creds)
+            # Fix v3: gspread>=6.0 dropped oauth2client — use native service_account_from_dict
+            self.client = gspread.service_account_from_dict(creds_dict)
 
             # Open by ID (most reliable), fall back to name
             sheet_id = config.GOOGLE_SHEET_ID
@@ -99,7 +92,7 @@ class GoogleSheetsStorage:
                 print(f"[Sheets] Opened by name: {config.GOOGLE_SHEET_NAME}")
 
             self._ensure_all_tabs()
-            print("[Sheets] ✓ All tabs ready")
+            print("[Sheets] ✅ All tabs ready — connected!")
 
         except json.JSONDecodeError as e:
             print(f"[Sheets] Invalid JSON credentials: {e}")
