@@ -72,7 +72,7 @@ class TelegramCommandHandler:
         )
 
     async def status(self, update: Update, context: ContextTypes.DEFAULT_TYPE):
-        balance     = self.bybit.get_balance("USDT")
+        balance, _  = self.bybit.get_balance("USDT")
         status_text = "🟢 <b>ACTIVE</b>" if not self.paused else "🟡 <b>PAUSED</b>"
         bal_text    = f"${balance:.4f}" if balance > 0 else "⚠️ Unreadable — check API key"
         await update.message.reply_text(

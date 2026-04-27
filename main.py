@@ -147,13 +147,15 @@ async def main():
         )
 
     # Check balance on startup
-    startup_balance = bybit.get_balance("USDT")
+    startup_balance, balance_err = bybit.get_balance("USDT")
     if startup_balance <= 0:
         await notifier.send_message(
-            "⚠️ <b>Balance Unreadable</b>\n"
-            "Bot cannot see your USDT balance.\n"
-            "Check: Bybit API key has Read + Spot Trade permissions.\n"
-            "Bot will still start but cannot size positions correctly."
+            f"⚠️ <b>Balance Unreadable</b>\n"
+            f"Bot cannot see your USDT balance.\n\n"
+            f"<b>Bybit API Error:</b>\n"
+            f"<code>{balance_err}</code>\n\n"
+            f"Check: Bybit API key has Read + Spot Trade permissions.\n"
+            f"Bot will still start but cannot size positions correctly."
         )
     else:
         await notifier.send_message(

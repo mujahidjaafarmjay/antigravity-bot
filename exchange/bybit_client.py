@@ -28,13 +28,12 @@ class BybitClient:
         print(f"[Bybit] Mode: {config.MODE.upper()} | Testnet: {config.TESTNET}")
 
     # ── Balance ───────────────────────────────────────────────
-    def get_balance(self, coin: str = "USDT") -> float:
+    def get_balance(self, coin: str = "USDT") -> tuple[float, str]:
         """
         Fix BALANCE: Try UNIFIED, SPOT, FUND in order.
-        Never break early on empty coin list — continue to next type.
-        Bybit spot-only accounts have balance under accountType=SPOT.
-        v3: per-account-type debug logging for Render diagnosis.
+        v3: Returns (balance, error_message) so main.py can send the exact error to Telegram.
         """
+        errors = []
         for acc_type in ["UNIFIED", "SPOT", "FUND"]:
             try:
                 resp = self.session.get_wallet_balance(
@@ -44,37 +43,30 @@ class BybitClient:
                 ret_msg  = resp.get("retMsg", "unknown")
 
                 if ret_code != 0:
-                    # Log the exact error — visible in Render logs
-                    print(f"[Balance] {acc_type}: retCode={ret_code} msg='{ret_msg}'")
+                    errors.append(f"{acc_type}: {ret_msg}")
                     continue
 
                 list_data = resp["result"].get("list", [])
                 if not list_data:
-                    print(f"[Balance] {acc_type}: empty list — try next")
+                    errors.append(f"{acc_type}: empty list")
                     continue
-
-                coins_found = [c["coin"] for c in list_data[0].get("coin", [])]
-                print(f"[Balance] {acc_type}: coins found = {coins_found}")
 
                 for item in list_data[0].get("coin", []):
                     if item["coin"] == coin:
-                        # Safe conversion — Bybit returns "" for zero-balance coins
                         val = float(item.get("walletBalance") or
                                     item.get("availableToWithdraw") or
                                     item.get("equity") or 0)
-                        print(f"[Balance] {acc_type}: {coin} walletBalance={val}")
                         if val > 0:
-                            print(f"[Balance] ✅ Found ${val:.4f} {coin} in {acc_type}")
-                            return val
-                # coin not in this account type — try next
+                            return val, "OK"
+                errors.append(f"{acc_type}: 0 balance")
                 continue
 
             except Exception as e:
-                print(f"[Balance] {acc_type} error: {e}")
+                errors.append(f"{acc_type} Exception: {str(e)[:50]}")
                 continue
 
-        print("[Balance] ❌ Could not find USDT in UNIFIED/SPOT/FUND — check API key permissions.")
-        return 0.0
+        err_str = " | ".join(errors) if errors else "Unknown API error"
+        return 0.0, err_str
 
     # ── Candles ───────────────────────────────────────────────
     def get_candles(self, symbol: str, interval: str, limit: int = 250) -> list:
