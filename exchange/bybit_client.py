@@ -21,6 +21,7 @@ class BybitClient:
             api_secret=config.API_SECRET,
             domain="bytick",
             timeout=30,
+            recv_window=20000,
         )
         self.category   = "spot"
         self.precisions = {}
