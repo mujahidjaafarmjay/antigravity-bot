@@ -6,21 +6,21 @@
 import os
 
 # ── Bybit API ────────────────────────────────────────────────
-API_KEY    = os.environ.get("BYBIT_API_KEY", "")
-API_SECRET = os.environ.get("BYBIT_API_SECRET", "")
+API_KEY    = os.environ.get("BYBIT_API_KEY", "").strip()
+API_SECRET = os.environ.get("BYBIT_API_SECRET", "").strip()
 
 # ── Telegram ─────────────────────────────────────────────────
-TELEGRAM_TOKEN = os.environ.get("TELEGRAM_TOKEN", "")
-CHAT_ID        = os.environ.get("TELEGRAM_CHAT_ID", "")
+TELEGRAM_TOKEN = os.environ.get("TELEGRAM_TOKEN", "").strip()
+CHAT_ID        = os.environ.get("TELEGRAM_CHAT_ID", "").strip()
 
 # ── Mode ─────────────────────────────────────────────────────
-MODE    = os.environ.get("MODE", "paper")
+MODE    = os.environ.get("MODE", "paper").strip().lower()
 TESTNET = MODE == "testnet"
 
 # ── Google Sheets ─────────────────────────────────────────────
-GOOGLE_SHEETS_CREDENTIALS = os.environ.get("GOOGLE_SHEETS_CREDENTIALS", "")
-GOOGLE_SHEET_NAME         = os.environ.get("GOOGLE_SHEET_NAME", "Antigravity Trades")
-GOOGLE_SHEET_ID           = os.environ.get("GOOGLE_SHEET_ID", "")  # Fix Bug 4
+GOOGLE_SHEETS_CREDENTIALS = os.environ.get("GOOGLE_SHEETS_CREDENTIALS", "").strip()
+GOOGLE_SHEET_NAME         = os.environ.get("GOOGLE_SHEET_NAME", "Antigravity Trades").strip()
+GOOGLE_SHEET_ID           = os.environ.get("GOOGLE_SHEET_ID", "").strip()  # Fix Bug 4
 
 # ── Risk Management ──────────────────────────────────────────
 MAX_RISK_PER_TRADE_PERCENT = float(os.environ.get("RISK_PER_TRADE", "2.0"))
