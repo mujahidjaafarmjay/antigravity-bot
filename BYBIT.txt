@@ -1,0 +1,15 @@
+Key successfully added
+To ensure the security of your account, your API secret key will be revealed only once at the time of creation and will be hidden thereafter. Please keep the secret key confidential and do not disclose it to anyone.
+Name
+Bot
+API Key
+rl03kCGUiQaDZ9mt4D
+Copy
+API Secret
+kqObBVTnNtxtoTmq2kqoplpstnArdPlpDwbc
+Copy
+Permission
+Unified Trading - Trade  , SPOT - Trade  , Wallet - Account Transfer Subaccount Transfer  , Exchange - Convert,Exchange History 
+08028911520
+HUSSEIN SANI KANKAROFI
+UNGUWA UKU MODEL PRIMARY SCHOOL

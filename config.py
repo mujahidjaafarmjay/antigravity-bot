@@ -1,7 +1,5 @@
 # ============================================================
-#  config.py — All settings read from environment variables.
-#  Fix Bug 5: DAILY_LOSS_LIMIT now reads from env var.
-#  Fix: GOOGLE_SHEET_ID added so sheet can open by ID.
+#  config.py — Final Optimized Settings
 # ============================================================
 import os
 
@@ -20,28 +18,36 @@ TESTNET = MODE == "testnet"
 # ── Google Sheets ─────────────────────────────────────────────
 GOOGLE_SHEETS_CREDENTIALS = os.environ.get("GOOGLE_SHEETS_CREDENTIALS", "").strip()
 GOOGLE_SHEET_NAME         = os.environ.get("GOOGLE_SHEET_NAME", "Antigravity Trades").strip()
-GOOGLE_SHEET_ID           = os.environ.get("GOOGLE_SHEET_ID", "").strip()  # Fix Bug 4
+GOOGLE_SHEET_ID           = os.environ.get("GOOGLE_SHEET_ID", "").strip()
 
-# ── Risk Management ──────────────────────────────────────────
-MAX_RISK_PER_TRADE_PERCENT = float(os.environ.get("RISK_PER_TRADE", "2.0"))
-MAX_OPEN_TRADES            = int(os.environ.get("MAX_OPEN_TRADES", "2"))
-# Fix Bug 5: reads DAILY_LOSS_LIMIT from env var (user set 1.0 in Render)
-DAILY_LOSS_LIMIT_PERCENT   = float(os.environ.get("DAILY_LOSS_LIMIT", "5.0"))
-REWARD_TO_RISK_RATIO       = float(os.environ.get("REWARD_TO_RISK", "2.0"))
-
-# ── Sharia-Compliant Whitelist ───────────────────────────────
-WHITELIST_PAIRS = [
+# ── Sharia-Compliant Whitelist (25 Vetted Pairs) ──────────────
+HALAL_PAIRS = [
     "BTCUSDT", "ETHUSDT", "SOLUSDT", "LINKUSDT", "AVAXUSDT",
     "ATOMUSDT", "ADAUSDT", "DOTUSDT", "NEARUSDT", "INJUSDT",
     "SUIUSDT", "APTUSDT", "OPUSDT", "ARBUSDT", "TIAUSDT",
     "STXUSDT", "FILUSDT", "ARUSDT", "KASUSDT", "ICPUSDT",
-    "TONUSDT", "QNTUSDT", "ENSUSDT", "GRTUSDT", "IMXUSDT",
+    "TONUSDT", "QNTUSDT", "ENSUSDT", "GRTUSDT", "IMXUSDT"
 ]
 
-# ── Strategy ─────────────────────────────────────────────────
-TIMEFRAME_MAIN  = "60"
-TIMEFRAME_TREND = "240"
-TIMEFRAME_DAILY = "D"
-RSI_PERIOD = 14
+# ── Risk Management ──────────────────────────────────────────
+# Risk per trade is dynamic (calculated in risk_manager.py)
+MAX_OPEN_TRADES            = int(os.environ.get("MAX_OPEN_TRADES", "2"))
+DAILY_LOSS_LIMIT_PERCENT   = float(os.environ.get("DAILY_LOSS_LIMIT", "5.0"))
+REWARD_TO_RISK_RATIO       = 2.2  # Gross RR to cover fees (1:2.0 net)
+MAX_POSITION_SIZE_PERCENT  = 40.0 # Max 40% of balance per trade
+
+# ── Strategy Constants ───────────────────────────────────────
 MA_FAST    = 50
 MA_SLOW    = 200
+OB_WINDOW  = 10  # Lookback for Order Blocks
+FVG_WINDOW = 3   # Lookback for Fair Value Gaps
+VOL_MULTIPLIER = 1.5
+VOL_WINDOW     = 20
+
+# ── Execution ────────────────────────────────────────────────
+TIMEFRAME = "60" # 1H Timeframe
+COOLDOWN_MINUTES = 30
+SPREAD_LIMIT = 0.001 # 0.1%
+API_DELAY = 0.4 # 0.3-0.5s delay
+RETRY_ATTEMPTS = 3
+BALANCE_CACHE_SECONDS = 30
