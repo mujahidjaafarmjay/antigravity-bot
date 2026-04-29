@@ -19,21 +19,30 @@ class BybitHandler:
         self.logger = logging.getLogger(__name__)
 
     def get_balance(self):
-        """Fetches USDT balance for Spot."""
-        try:
-            res = self.session.get_wallet_balance(accountType="UNIFIED", coin="USDT")
-            # For Spot on Unified Account, it's usually under 'totalWalletBalance' or specific coin
-            list_data = res.get('result', {}).get('list', [])
-            if not list_data:
-                return 0.0
+        """Fetches USDT balance across possible account types (Unified, Funding, Spot)."""
+        total_balance = 0.0
+        account_types = ["UNIFIED", "FUNDING", "SPOT"]
+        
+        for acc_type in account_types:
+            try:
+                res = self.session.get_wallet_balance(accountType=acc_type, coin="USDT")
+                list_data = res.get('result', {}).get('list', [])
+                if not list_data:
+                    continue
+                
+                for coin_data in list_data[0].get('coin', []):
+                    if coin_data['coin'] == "USDT":
+                        bal = float(coin_data.get('walletBalance', 0) or coin_data.get('equity', 0))
+                        total_balance += bal
+                        self.logger.info(f"Found {bal} USDT in {acc_type} account.")
+            except Exception as e:
+                # Silently skip if account type is not supported for this API key
+                continue
+                
+        if total_balance == 0.0:
+            self.logger.warning("Total balance is 0.0. Please ensure funds are in Unified, Funding, or Spot account and API key has permissions.")
             
-            for coin_data in list_data[0].get('coin', []):
-                if coin_data['coin'] == "USDT":
-                    return float(coin_data['walletBalance'])
-            return 0.0
-        except Exception as e:
-            self.logger.error(f"Error fetching balance: {e}")
-            return 0.0
+        return total_balance
 
     def get_ticker(self, symbol):
         """Fetches the latest price for a symbol."""
