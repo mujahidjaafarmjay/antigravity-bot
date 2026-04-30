@@ -49,7 +49,7 @@ TEST_MODE_THRESHOLD = 3
 # ── Execution ────────────────────────────────────────────────
 TIMEFRAME = "60" # 1H Timeframe
 COOLDOWN_MINUTES = 30
-SPREAD_LIMIT = 0.001 # 0.1%
+SPREAD_LIMIT = 0.002 # 0.2% (Balanced: Execution vs Cost)
 API_DELAY = 0.4 # 0.3-0.5s delay
 RETRY_ATTEMPTS = 3
 BALANCE_CACHE_SECONDS = 30
