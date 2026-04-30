@@ -7,7 +7,9 @@ from logic.brain import Brain
 from logic.risk_manager import RiskManager
 from storage.sheets_persistence import SheetsPersistence
 from notifications.telegram_sender import TelegramSender
+from notifications.command_handler import TelegramCommandHandler
 import threading
+import asyncio
 from flask import Flask
 import os
 
@@ -36,6 +38,7 @@ class TradingBot:
         self.risk = RiskManager()
         self.sheets = SheetsPersistence()
         self.telegram = TelegramSender()
+        self.cmd_handler = TelegramCommandHandler(self.telegram, self.bybit, self.sheets, self.risk)
         
         self.cooldowns = {}
         self.daily_pnl = 0.0
@@ -180,4 +183,13 @@ if __name__ == "__main__":
     threading.Thread(target=run_flask, daemon=True).start()
     
     bot = TradingBot()
+    
+    # Start Telegram Listener in background
+    def start_telegram():
+        loop = asyncio.new_event_loop()
+        asyncio.set_event_loop(loop)
+        loop.run_until_complete(bot.cmd_handler.run_listener())
+        
+    threading.Thread(target=start_telegram, daemon=True).start()
+    
     bot.run()
