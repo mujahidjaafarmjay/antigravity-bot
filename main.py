@@ -106,11 +106,19 @@ class TradingBot:
                         open_orders = self.bybit.get_open_orders()
                         valid, reason = self.risk.validate_trade(decision, balance, len(open_orders), bid, ask)
                         
+                        if not valid:
+                            logger.warning(f"⚠️ Trade Validation Failed for {symbol}: {reason}")
+                            self.telegram.send_message(f"⚠️ <b>Trade Blocked: {symbol}</b>\nReason: {reason}")
+                            continue
+
                         if valid:
                             # Calculate Qty
                             qty, qty_reason = self.risk.calculate_position(balance, decision['entry'], decision['stop_loss'])
                             if qty > 0:
                                 # Execute Order
+                                logger.info(f"🚀 EXECUTING TRADE: {symbol} | Qty: {qty} | Entry: {decision['entry']}")
+                                self.telegram.send_message(f"🚀 <b>Executing Trade: {symbol}</b>\nQty: {qty:.6f}\nPrice: {decision['entry']}")
+                                
                                 order_id = self.bybit.execute_limit_order(
                                     symbol=symbol,
                                     side="Buy",
@@ -129,11 +137,17 @@ class TradingBot:
                                     
                                     # Set Cooldown
                                     self.cooldowns[symbol] = datetime.now() + timedelta(minutes=config.COOLDOWN_MINUTES)
-                                    logger.info(f"SUCCESS: Trade executed for {symbol}")
+                                logger.info(f"SUCCESS: Trade executed for {symbol}")
                             else:
-                                logger.warning(f"Trade skipped for {symbol}: {qty_reason}")
+                                if qty_reason == "SMALL_TRADE_WATCH":
+                                    logger.info(f"👀 WATCH: {symbol} signal is valid but position size is too small for Bybit ($5).")
+                                    self.telegram.send_message(f"👀 <b>WATCH: {symbol}</b>\nSignal is VALID, but position size is below Bybit's $5 minimum.\nTracking for performance analysis.")
+                                else:
+                                    logger.warning(f"❌ Trade skipped for {symbol}: {qty_reason}")
+                                    self.telegram.send_message(f"❌ <b>Qty Error: {symbol}</b>\n{qty_reason}")
                         else:
-                            logger.info(f"Trade skipped for {symbol}: {reason}")
+                            # This block is now handled above, but keeping for structure
+                            pass
 
                     time.sleep(config.API_DELAY) # Avoid rate limits
 
