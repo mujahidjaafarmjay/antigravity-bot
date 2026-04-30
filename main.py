@@ -97,6 +97,10 @@ class TradingBot:
                     decision = self.brain.evaluate_trade(symbol, df, balance)
                     logger.info(f"Decision for {symbol}: {decision['action']} (Score: {decision['score']}) - {decision['reason']}")
 
+                    # Debug Telegram (Only for interesting scores to avoid spam)
+                    if decision['score'] >= 3:
+                        self.telegram.send_message(f"🔍 <b>{symbol} Analysis</b>\nScore: {decision['score']}\nAction: {decision['action']}\nReason: {decision['reason']}")
+
                     if decision['action'] in ["BUY", "STRONG BUY"]:
                         # Validate with Risk Manager
                         open_orders = self.bybit.get_open_orders()

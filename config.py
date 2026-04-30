@@ -41,8 +41,10 @@ MA_FAST    = 50
 MA_SLOW    = 200
 OB_WINDOW  = 10  # Lookback for Order Blocks
 FVG_WINDOW = 3   # Lookback for Fair Value Gaps
-VOL_MULTIPLIER = 1.5
+VOL_MULTIPLIER = 1.2
 VOL_WINDOW     = 20
+SCORE_THRESHOLD = 4
+TEST_MODE_THRESHOLD = 3
 
 # ── Execution ────────────────────────────────────────────────
 TIMEFRAME = "60" # 1H Timeframe
