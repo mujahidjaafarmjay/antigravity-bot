@@ -41,6 +41,8 @@ class TradingBot:
         self.daily_pnl = 0.0
         self.is_halted = False
         self.starting_balance = 0.0
+        self.reported_signals = {} # Track last score sent to Telegram
+        self.instance_id = datetime.now().strftime("%H%M%S") # Unique ID for this run
         
         self._recover_state()
 
@@ -97,9 +99,18 @@ class TradingBot:
                     decision = self.brain.evaluate_trade(symbol, df, balance)
                     logger.info(f"Decision for {symbol}: {decision['action']} (Score: {decision['score']}) - {decision['reason']}")
 
-                    # Debug Telegram (Only for interesting scores to avoid spam)
-                    if decision['score'] >= 3:
-                        self.telegram.send_message(f"🔍 <b>{symbol} Analysis</b>\nScore: {decision['score']}\nAction: {decision['action']}\nReason: {decision['reason']}")
+                    # Debug Telegram (Only if score is new or changed to avoid spam)
+                    last_score = self.reported_signals.get(symbol, 0)
+                    if decision['score'] >= 3 and decision['score'] != last_score:
+                        self.telegram.send_message(
+                            f"🔍 <b>{symbol} Analysis</b> (ID: {self.instance_id})\n"
+                            f"Score: {decision['score']}\n"
+                            f"Action: {decision['action']}\n"
+                            f"Reason: {decision['reason']}"
+                        )
+                    
+                    # Always update memory to detect the NEXT change
+                    self.reported_signals[symbol] = decision['score']
 
                     if decision['action'] in ["BUY", "STRONG BUY"]:
                         # Validate with Risk Manager
@@ -159,7 +170,9 @@ class TradingBot:
                 time.sleep(60) 
 
             except Exception as e:
-                logger.error(f"Unexpected error in main loop: {e}")
+                err_msg = f"Unexpected error in main loop: {e}"
+                logger.error(err_msg)
+                self.telegram.send_message(f"🚨 <b>BOT ERROR</b>\n{err_msg}")
                 time.sleep(30)
 
 if __name__ == "__main__":

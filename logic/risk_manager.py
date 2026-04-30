@@ -72,6 +72,9 @@ class RiskManager:
             return False, f"RR too low ({rr:.2f} < {config.REWARD_TO_RISK_RATIO})"
 
         # 4. Spread Protection
+        if bid <= 0:
+            return False, "Invalid Bid Price (0)"
+            
         spread = (ask - bid) / bid
         if spread > config.SPREAD_LIMIT:
             return False, f"Spread too high ({spread:.2%})"
