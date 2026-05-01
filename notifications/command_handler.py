@@ -72,7 +72,7 @@ class TelegramCommandHandler:
         )
 
     async def status(self, update: Update, context: ContextTypes.DEFAULT_TYPE):
-        balance, _  = self.bybit.get_balance("USDT")
+        balance = self.bybit.get_balance()
         status_text = "🟢 <b>ACTIVE</b>" if not self.paused else "🟡 <b>PAUSED</b>"
         bal_text    = f"${balance:.4f}" if balance > 0 else "⚠️ Unreadable — check API key"
         await update.message.reply_text(
@@ -88,64 +88,34 @@ class TelegramCommandHandler:
         )
 
     async def open_trades(self, update: Update, context: ContextTypes.DEFAULT_TYPE):
-        if not self.active_trades:
+        orders = self.bybit.get_open_orders()
+        if not orders:
             await update.message.reply_text(
                 "📭 <b>No Open Trades</b> at the moment.", parse_mode="HTML"
             )
             return
-        msg = "📈 <b>ACTIVE TRADES</b>\n━━━━━━━━━━━━━━━\n"
-        for symbol, data in self.active_trades.items():
-            price = self.bybit.get_ticker(symbol) or data["entry"]
-            pnl   = (price - data["entry"]) / data["entry"] * 100
-            icon  = "🟢" if pnl >= 0 else "🔴"
-            msg  += (
-                f"{icon} <b>{symbol}</b>\n"
-                f"Entry: ${data['entry']:.4f} | Now: ${price:.4f}\n"
-                f"SL: ${data['sl']:.4f} | TP: ${data['tp']:.4f}\n"
-                f"P&amp;L: <b>{pnl:+.2f}%</b>\n"
+        msg = "📈 <b>ACTIVE ORDERS</b>\n━━━━━━━━━━━━━━━\n"
+        for order in orders:
+            symbol = order['symbol']
+            price = order.get('price', 'Market')
+            qty = order.get('qty', '0')
+            side = order.get('side', 'Buy')
+            msg += (
+                f"<b>{symbol}</b> ({side})\n"
+                f"Qty: {qty} | Price: ${price}\n"
                 f"━━━━━━━━━━━━━━━\n"
             )
         await update.message.reply_text(msg, parse_mode="HTML")
 
     async def profit_report(self, update: Update, context: ContextTypes.DEFAULT_TYPE):
-        log_file = os.path.join(
-            os.path.dirname(os.path.dirname(__file__)), "logs", "trades.csv"
+        await update.message.reply_text(
+            "📅 <b>PROFIT REPORT</b>\n"
+            "━━━━━━━━━━━━━━━\n"
+            "All trade history is now synced live to <b>Google Sheets</b> for production persistence.\n\n"
+            f"🔗 <b>Sheet Name:</b> {config.GOOGLE_SHEET_NAME}\n"
+            "Check your spreadsheet for the full P&amp;L audit trail.",
+            parse_mode="HTML",
         )
-        if not os.path.exists(log_file):
-            await update.message.reply_text(
-                "📅 <b>No trade history yet.</b>\n"
-                "Trades will appear here once the bot makes its first entry.",
-                parse_mode="HTML",
-            )
-            return
-        try:
-            trades, wins, total_pnl = [], 0, 0.0
-            with open(log_file) as f:
-                reader = csv.DictReader(f)
-                for row in reader:
-                    trades.append(row)
-                    # Fix: column is "Net_Profit" not "P&L"
-                    pnl = float(row.get("Net_Profit", 0) or 0)
-                    total_pnl += pnl
-                    if pnl > 0:
-                        wins += 1
-            closed = [t for t in trades if t.get("Status") == "CLOSED"]
-            wr     = round(wins / len(closed) * 100) if closed else 0
-            sign   = "+" if total_pnl >= 0 else ""
-            await update.message.reply_text(
-                f"📅 <b>PROFIT REPORT</b>\n"
-                f"━━━━━━━━━━━━━━━\n"
-                f"<b>Total Trades:</b> {len(trades)}\n"
-                f"<b>Closed:</b>       {len(closed)}\n"
-                f"<b>Win Rate:</b>     {wr}%\n"
-                f"<b>Total P&amp;L:</b>    {sign}${total_pnl:.4f} USDT\n"
-                f"━━━━━━━━━━━━━━━",
-                parse_mode="HTML",
-            )
-        except Exception as e:
-            await update.message.reply_text(
-                f"⚠️ Error reading trade log: {e}", parse_mode="HTML"
-            )
 
     async def pause(self, update: Update, context: ContextTypes.DEFAULT_TYPE):
         self.paused = True
@@ -200,7 +170,7 @@ class TelegramCommandHandler:
             self.scan_requested = True
             await update.message.reply_text(
                 f"🔍 <b>Manual Scan started.</b> "
-                f"Checking {len(config.WHITELIST_PAIRS)} pairs...",
+                f"Checking {len(config.HALAL_PAIRS)} pairs...",
                 parse_mode="HTML",
             )
         elif text == "❓ Help":
