@@ -211,9 +211,14 @@ class TradingBot:
                 # Update Meta periodically
                 self.sheets.update_meta(self.daily_pnl, self.is_halted)
                 
-                # Sleep before next scan
+                # Sleep before next scan (Check for manual scan request every second)
                 logger.info("Scan complete. Sleeping...")
-                time.sleep(60) 
+                for _ in range(60):
+                    if getattr(self.cmd_handler, 'scan_requested', False):
+                        logger.info("Manual scan requested via Telegram!")
+                        self.cmd_handler.scan_requested = False
+                        break
+                    time.sleep(1)
 
             except Exception as e:
                 err_msg = f"Unexpected error in main loop: {e}"
