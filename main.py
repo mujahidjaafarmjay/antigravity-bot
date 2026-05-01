@@ -154,44 +154,42 @@ class TradingBot:
                                 # 5. Lock execution BEFORE attempt to prevent race conditions
                                 self.execution_lock[symbol] = datetime.now() + timedelta(minutes=15)
                                 
-                                logger.info(f"🚀 ATTEMPTING MARKET TRADE: {symbol} | Qty: {qty} | Estimated Price: {exec_price}")
+                                logger.info(f"🚀 ATTEMPTING HARDENED MARKET TRADE: {symbol} | Qty: {qty} | Estimated Price: {exec_price}")
                                 
                                 if (qty * exec_price) < 5.0:
                                     logger.warning(f"Trade too small for Bybit: {qty * exec_price:.2f} USDT")
                                     self.telegram.send_message(f"👀 <b>WATCH: {symbol}</b>\nSignal is VALID, but position size is below Bybit's $5 minimum.\nTracking for performance analysis.")
                                     continue
 
-                                res = self.bybit.execute_limit_order(
+                                result = self.bybit.place_market_order(
                                     symbol=symbol,
-                                    side="Buy",
                                     qty=qty,
-                                    price=exec_price,
                                     sl=decision['stop_loss'],
                                     tp=decision['take_profit']
                                 )
                                 
-                                if res and res.get('retCode') == 0:
+                                if result["success"]:
                                     # ✅ SUCCESS
-                                    order_id = res['result']['orderId']
+                                    order_id = result['order_id']
                                     logger.info(f"✅ SUCCESS: Trade executed for {symbol} | ID: {order_id}")
                                     self.telegram.send_message(
                                         f"✅ <b>ORDER PLACED: {symbol}</b>\n"
-                                        f"Qty: {qty:.6f}\n"
-                                        f"Price: {exec_price}\n"
+                                        f"Qty: {result['qty']}\n"
+                                        f"Price: {result['price']}\n"
                                         f"ID: {order_id}"
                                     )
                                     
                                     # Log to Sheets
                                     trade_log = decision.copy()
-                                    trade_log['qty'] = qty
-                                    trade_log['entry'] = exec_price
+                                    trade_log['qty'] = result['qty']
+                                    trade_log['entry'] = result['price']
                                     self.sheets.log_trade(trade_log)
                                     
                                     # Set final cooldown
                                     self.cooldowns[symbol] = datetime.now() + timedelta(minutes=config.COOLDOWN_MINUTES)
                                 else:
                                     # ❌ FAILURE
-                                    err_msg = res.get('retMsg', 'Unknown Error') if res else 'No Response'
+                                    err_msg = result["error"]
                                     logger.error(f"❌ ORDER FAILED: {symbol} | {err_msg}")
                                     self.telegram.send_message(
                                         f"❌ <b>ORDER FAILED: {symbol}</b>\n"

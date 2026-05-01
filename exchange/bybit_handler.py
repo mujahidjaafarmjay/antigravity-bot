@@ -18,6 +18,10 @@ class BybitHandler:
         self.category = "spot"
         self.logger = logging.getLogger(__name__)
 
+    def format_quantity(self, qty, step=0.01):
+        """Ensures quantity matches Bybit's precision rules."""
+        return float(int(float(qty) / step) * step)
+
     def get_balance(self):
         """Fetches USDT balance across possible account types (Unified, Funding, Spot)."""
         total_balance = 0.0
@@ -85,39 +89,55 @@ class BybitHandler:
             self.logger.error(f"Error fetching market data for {symbol}: {e}")
             return None, 0, 0
 
-    def execute_limit_order(self, symbol, side, qty, price, sl, tp):
+    def place_market_order(self, symbol, qty, sl, tp):
         """
-        Executes a LIMIT order with TP and SL.
-        Uses PostOnly to minimize fees.
+        Hardened Market Order Execution (Production Debug Version).
+        Bypasses price mismatch issues to confirm API and balance connectivity.
         """
         try:
-            # 1. Place the main LIMIT order
-            # Note: Bybit Spot OCO is slightly different from Futures. 
-            # We place the limit order first, then attach TP/SL if supported or manage manually.
-            # In Spot V5 API, we can use orderFilter="tpslOrder" for certain types or just place them as separate orders.
+            # 1. Fetch live ticker for metadata (even if Market order doesn't need it for entry)
+            tickers = self.session.get_tickers(category=self.category, symbol=symbol)
+            ticker = tickers['result']['list'][0]
+            price = float(ticker['ask1Price'])
+
+            # 2. Safety Formatting
+            qty = self.format_quantity(qty, step=0.01) # Default step for most spot pairs
             
+            if qty <= 0:
+                return {"success": False, "error": "Invalid formatted qty (0)"}
+
+            # 3. Place Market Order
             res = self.session.place_order(
                 category=self.category,
                 symbol=symbol,
-                side=side,
+                side="Buy",
                 orderType="Market",
                 qty=str(qty),
-                # price removed for Market order
-                timeInForce="GTC",
-                isLeverage=0,
+                # Note: Market orders ignore price, but we attach SL/TP if supported
                 takeProfit=str(tp),
-                stopLoss=str(sl),
-                tpOrderType="Limit",
-                slOrderType="Market",
+                stopLoss=str(sl)
             )
+
             self.logger.info(f"BYBIT RAW RESPONSE: {res}")
-            return res
+
+            if res.get("retCode") == 0:
+                return {
+                    "success": True,
+                    "order_id": res['result']['orderId'],
+                    "price": price,
+                    "qty": qty
+                }
+            else:
+                return {
+                    "success": False,
+                    "error": res.get("retMsg", "Unknown Exchange Error")
+                }
 
         except Exception as e:
             self.logger.error(f"🚨 BYBIT EXCEPTION for {symbol}: {e}")
             return {
-                "retCode": -1,
-                "retMsg": str(e)
+                "success": False,
+                "error": str(e)
             }
 
     def get_open_orders(self, symbol=None):
