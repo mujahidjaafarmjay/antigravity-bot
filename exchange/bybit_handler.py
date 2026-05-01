@@ -68,6 +68,8 @@ class BybitHandler:
             tickers = self.session.get_tickers(category=self.category, symbol=symbol)
             
             import pandas as pd
+            self.logger.info(f"DEBUG: First kline candle for {symbol}: {kline['result']['list'][0]}")
+            
             df = pd.DataFrame(kline['result']['list'], columns=[
                 'timestamp', 'open', 'high', 'low', 'close', 'volume', 'turnover'
             ])
@@ -94,28 +96,21 @@ class BybitHandler:
             # We place the limit order first, then attach TP/SL if supported or manage manually.
             # In Spot V5 API, we can use orderFilter="tpslOrder" for certain types or just place them as separate orders.
             
-            order = self.session.place_order(
+            res = self.session.place_order(
                 category=self.category,
                 symbol=symbol,
                 side=side,
                 orderType="Limit",
                 qty=str(qty),
                 price=str(price),
-                timeInForce="PostOnly",
+                timeInForce="GTC",
                 isLeverage=0,
-                # In Bybit V5 Spot, TP/SL can be attached to the order
                 takeProfit=str(tp),
                 stopLoss=str(sl),
-                tpOrderType="Limit", # Use Limit for TP too
-                slOrderType="Market", # Market SL for safety
+                tpOrderType="Limit",
+                slOrderType="Market",
             )
-            
-            if order['retCode'] == 0:
-                self.logger.info(f"Order placed: {symbol} {side} {qty} @ {price} | TP: {tp} SL: {sl}")
-                return order['result']['orderId']
-            else:
-                self.logger.error(f"Order failed: {order['retMsg']}")
-                return None
+            return res
 
         except Exception as e:
             self.logger.error(f"Error executing order for {symbol}: {e}")

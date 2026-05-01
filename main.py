@@ -45,6 +45,7 @@ class TradingBot:
         self.is_halted = False
         self.starting_balance = 0.0
         self.reported_signals = {} # Track last score sent to Telegram
+        self.execution_lock = {} # Prevent duplicate execution attempts
         self.instance_id = datetime.now().strftime("%H%M%S") # Unique ID for this run
         
         self._recover_state()
@@ -91,6 +92,11 @@ class TradingBot:
                     if symbol in self.cooldowns:
                         if datetime.now() < self.cooldowns[symbol]:
                             continue
+                            
+                    # Prevent re-attempting same trade too frequently
+                    if symbol in self.execution_lock:
+                        if datetime.now() < self.execution_lock[symbol]:
+                            continue
 
                     logger.info(f"Analyzing {symbol}...")
                     df, bid, ask = self.bybit.get_market_data(symbol)
@@ -126,32 +132,66 @@ class TradingBot:
                             continue
 
                         if valid:
-                            # Calculate Qty
-                            qty, qty_reason = self.risk.calculate_position(balance, decision['entry'], decision['stop_loss'])
+                            # 1. Global Trade Limit Check
+                            open_orders = self.bybit.get_open_orders()
+                            if len(open_orders) >= config.MAX_OPEN_TRADES:
+                                logger.warning(f"Max trades reached ({config.MAX_OPEN_TRADES}). Skipping {symbol}.")
+                                continue
+
+                            # 2. Per-Symbol Check (Secondary Guard)
+                            symbol_orders = [o for o in open_orders if o['symbol'] == symbol]
+                            if symbol_orders:
+                                logger.info(f"Skipping {symbol}: Already has open orders.")
+                                continue
+
+                            # 3. Use LIVE Ticker for Execution Price (not candle data)
+                            # We use 'ask' for Buying to ensure immediate placement
+                            exec_price = ask
+                            
+                            # 4. Calculate Qty
+                            qty, qty_reason = self.risk.calculate_position(balance, exec_price, decision['stop_loss'])
                             if qty > 0:
-                                # Execute Order
-                                logger.info(f"🚀 EXECUTING TRADE: {symbol} | Qty: {qty} | Entry: {decision['entry']}")
-                                self.telegram.send_message(f"🚀 <b>Executing Trade: {symbol}</b>\nQty: {qty:.6f}\nPrice: {decision['entry']}")
+                                # 5. Lock execution BEFORE attempt to prevent race conditions
+                                self.execution_lock[symbol] = datetime.now() + timedelta(minutes=15)
                                 
-                                order_id = self.bybit.execute_limit_order(
+                                logger.info(f"🚀 ATTEMPTING TRADE: {symbol} | Qty: {qty} | Price: {exec_price}")
+                                
+                                res = self.bybit.execute_limit_order(
                                     symbol=symbol,
                                     side="Buy",
                                     qty=qty,
-                                    price=decision['entry'],
+                                    price=exec_price,
                                     sl=decision['stop_loss'],
                                     tp=decision['take_profit']
                                 )
                                 
-                                if order_id:
-                                    # Log and Notify
+                                if res and res.get('retCode') == 0:
+                                    # ✅ SUCCESS
+                                    order_id = res['result']['orderId']
+                                    logger.info(f"✅ SUCCESS: Trade executed for {symbol} | ID: {order_id}")
+                                    self.telegram.send_message(
+                                        f"✅ <b>ORDER PLACED: {symbol}</b>\n"
+                                        f"Qty: {qty:.6f}\n"
+                                        f"Price: {exec_price}\n"
+                                        f"ID: {order_id}"
+                                    )
+                                    
+                                    # Log to Sheets
                                     trade_log = decision.copy()
                                     trade_log['qty'] = qty
+                                    trade_log['entry'] = exec_price
                                     self.sheets.log_trade(trade_log)
-                                    self.telegram.alert_trade(trade_log)
                                     
-                                    # Set Cooldown
+                                    # Set final cooldown
                                     self.cooldowns[symbol] = datetime.now() + timedelta(minutes=config.COOLDOWN_MINUTES)
-                                logger.info(f"SUCCESS: Trade executed for {symbol}")
+                                else:
+                                    # ❌ FAILURE
+                                    err_msg = res.get('retMsg', 'Unknown Error') if res else 'No Response'
+                                    logger.error(f"❌ ORDER FAILED: {symbol} | {err_msg}")
+                                    self.telegram.send_message(
+                                        f"❌ <b>ORDER FAILED: {symbol}</b>\n"
+                                        f"Reason: {err_msg}"
+                                    )
                             else:
                                 if qty_reason == "SMALL_TRADE_WATCH":
                                     logger.info(f"👀 WATCH: {symbol} signal is valid but position size is too small for Bybit ($5).")
