@@ -100,9 +100,9 @@ class BybitHandler:
                 category=self.category,
                 symbol=symbol,
                 side=side,
-                orderType="Limit",
+                orderType="Market",
                 qty=str(qty),
-                price=str(price),
+                # price removed for Market order
                 timeInForce="GTC",
                 isLeverage=0,
                 takeProfit=str(tp),
@@ -110,11 +110,15 @@ class BybitHandler:
                 tpOrderType="Limit",
                 slOrderType="Market",
             )
+            self.logger.info(f"BYBIT RAW RESPONSE: {res}")
             return res
 
         except Exception as e:
-            self.logger.error(f"Error executing order for {symbol}: {e}")
-            return None
+            self.logger.error(f"🚨 BYBIT EXCEPTION for {symbol}: {e}")
+            return {
+                "retCode": -1,
+                "retMsg": str(e)
+            }
 
     def get_open_orders(self, symbol=None):
         """Fetches active orders."""

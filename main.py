@@ -154,8 +154,13 @@ class TradingBot:
                                 # 5. Lock execution BEFORE attempt to prevent race conditions
                                 self.execution_lock[symbol] = datetime.now() + timedelta(minutes=15)
                                 
-                                logger.info(f"🚀 ATTEMPTING TRADE: {symbol} | Qty: {qty} | Price: {exec_price}")
+                                logger.info(f"🚀 ATTEMPTING MARKET TRADE: {symbol} | Qty: {qty} | Estimated Price: {exec_price}")
                                 
+                                if (qty * exec_price) < 5.0:
+                                    logger.warning(f"Trade too small for Bybit: {qty * exec_price:.2f} USDT")
+                                    self.telegram.send_message(f"👀 <b>WATCH: {symbol}</b>\nSignal is VALID, but position size is below Bybit's $5 minimum.\nTracking for performance analysis.")
+                                    continue
+
                                 res = self.bybit.execute_limit_order(
                                     symbol=symbol,
                                     side="Buy",
