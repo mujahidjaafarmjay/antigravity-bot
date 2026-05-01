@@ -106,16 +106,20 @@ class BybitHandler:
             if qty <= 0:
                 return {"success": False, "error": "Invalid formatted qty (0)"}
 
-            # 3. Place Market Order
+            # 3. Place LIMIT Order (Hardened)
             res = self.session.place_order(
                 category=self.category,
                 symbol=symbol,
                 side="Buy",
-                orderType="Market",
+                orderType="Limit",
                 qty=str(qty),
-                # Note: Market orders ignore price, but we attach SL/TP if supported
+                price=str(price),
+                timeInForce="GTC", # Good Till Cancelled
+                isLeverage=0,
                 takeProfit=str(tp),
-                stopLoss=str(sl)
+                stopLoss=str(sl),
+                tpOrderType="Limit",
+                slOrderType="Market"
             )
 
             self.logger.info(f"BYBIT RAW RESPONSE: {res}")

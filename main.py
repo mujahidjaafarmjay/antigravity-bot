@@ -154,7 +154,7 @@ class TradingBot:
                                 # 5. Lock execution BEFORE attempt to prevent race conditions
                                 self.execution_lock[symbol] = datetime.now() + timedelta(minutes=15)
                                 
-                                logger.info(f"🚀 ATTEMPTING HARDENED MARKET TRADE: {symbol} | Qty: {qty} | Estimated Price: {exec_price}")
+                                logger.info(f"🚀 ATTEMPTING HARDENED LIMIT TRADE: {symbol} | Qty: {qty} | Price: {exec_price}")
                                 
                                 if (qty * exec_price) < 5.0:
                                     logger.warning(f"Trade too small for Bybit: {qty * exec_price:.2f} USDT")
