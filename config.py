@@ -35,6 +35,7 @@ MAX_OPEN_TRADES            = int(os.environ.get("MAX_OPEN_TRADES", "2"))
 DAILY_LOSS_LIMIT_PERCENT   = float(os.environ.get("DAILY_LOSS_LIMIT", "5.0"))
 REWARD_TO_RISK_RATIO       = 2.2  # Gross RR to cover fees (1:2.0 net)
 MAX_POSITION_SIZE_PERCENT  = 40.0 # Max 40% of balance per trade
+MIN_TRADE_USDT             = 6.0  # Bybit minimum is ~$5, we use $6 for safety
 
 # ── Strategy Constants ───────────────────────────────────────
 MA_FAST    = 50
@@ -43,13 +44,13 @@ OB_WINDOW  = 10  # Lookback for Order Blocks
 FVG_WINDOW = 3   # Lookback for Fair Value Gaps
 VOL_MULTIPLIER = 1.2
 VOL_WINDOW     = 20
-SCORE_THRESHOLD = 3
+SCORE_THRESHOLD = 4 # Tighter threshold for $40 capital (Ignore Score 3)
 TEST_MODE_THRESHOLD = 3
 
 # ── Execution ────────────────────────────────────────────────
 TIMEFRAME = "60" # 1H Timeframe
 COOLDOWN_MINUTES = 30
-SPREAD_LIMIT = 0.002 # 0.2% (Balanced: Execution vs Cost)
+SPREAD_LIMIT = 0.0015 # 0.15% (Tighter spread for small accounts)
 API_DELAY = 0.4 # 0.3-0.5s delay
 RETRY_ATTEMPTS = 3
 BALANCE_CACHE_SECONDS = 30
