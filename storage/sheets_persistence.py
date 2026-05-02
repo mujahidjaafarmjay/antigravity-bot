@@ -172,6 +172,85 @@ class SheetsPersistence:
             self.logger.error(f"Error getting active trades from Sheets: {e}")
             return {}
 
+    def get_all_performance_data(self):
+        """Fetches all raw performance data from Sheets."""
+        if not self.perf_tab: return []
+        try:
+            return self.perf_tab.get_all_records()
+        except Exception as e:
+            self.logger.error(f"Error fetching performance data: {e}")
+            return []
+
+    def get_performance_summary(self):
+        """Calculates performance metrics grouped by score."""
+        data = self.get_all_performance_data()
+        if not data:
+            return {}
+
+        summary = {} # {score: {metrics}}
+
+        for row in data:
+            try:
+                score = row.get('Score')
+                if score is None or score == "": continue
+                score = int(score)
+
+                if score not in summary:
+                    summary[score] = {
+                        "trades": 0, "wins": 0, "losses": 0,
+                        "total_pnl": 0.0, "total_fees": 0.0,
+                        "win_amounts": [], "loss_amounts": []
+                    }
+
+                s = summary[score]
+                s["trades"] += 1
+                pnl = float(row.get('PnL', 0))
+                fees = float(row.get('Fees', 0))
+                outcome = row.get('Outcome')
+
+                s["total_pnl"] += pnl
+                s["total_fees"] += fees
+
+                if outcome == "WIN":
+                    s["wins"] += 1
+                    s["win_amounts"].append(pnl)
+                elif outcome == "LOSS":
+                    s["losses"] += 1
+                    s["loss_amounts"].append(abs(pnl))
+            except Exception as e:
+                self.logger.error(f"Error processing row for performance summary: {e}")
+                continue
+
+        # Finalize calculations
+        final_summary = {}
+        for score, s in summary.items():
+            win_rate = s["wins"] / s["trades"] if s["trades"] > 0 else 0
+
+            # Correct Avg Win/Loss: only use data from corresponding outcomes
+            avg_win = sum(s["win_amounts"]) / len(s["win_amounts"]) if s["win_amounts"] else 0.0
+            avg_loss = sum(s["loss_amounts"]) / len(s["loss_amounts"]) if s["loss_amounts"] else 0.0
+
+            # Expectancy = (WinRate * AvgWin) - (LossRate * AvgLoss)
+            expectancy = (win_rate * avg_win) - ((1 - win_rate) * avg_loss)
+
+            # Profit Factor = Total Win Amount / Total Loss Amount
+            total_wins = sum(s["win_amounts"])
+            total_losses = sum(s["loss_amounts"])
+            profit_factor = total_wins / total_losses if total_losses > 0 else (float('inf') if total_wins > 0 else 1.0)
+
+            final_summary[score] = {
+                "score": score,
+                "trades": s["trades"],
+                "win_rate": win_rate,
+                "net_pnl": s["total_pnl"],
+                "expectancy": expectancy,
+                "profit_factor": profit_factor,
+                "avg_win": avg_win,
+                "avg_loss": avg_loss
+            }
+
+        return final_summary
+
     def get_bot_meta(self, key):
         """Retrieves a specific metadata value."""
         if not self.meta_tab: return None

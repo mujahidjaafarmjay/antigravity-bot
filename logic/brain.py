@@ -1,6 +1,8 @@
 import pandas as pd
 import numpy as np
 import config
+from datetime import datetime
+import pytz
 
 class Brain:
     """
@@ -10,10 +12,25 @@ class Brain:
 
     def __init__(self):
         self.halal_pairs = config.HALAL_PAIRS
+        self.disabled_scores = set()
+
+    def set_disabled_scores(self, scores):
+        """Updates the set of disabled scores based on optimizer feedback."""
+        self.disabled_scores = set(scores)
 
     def is_halal(self, symbol):
         """Checks if the symbol is in the Sharia-compliant whitelist."""
         return symbol in self.halal_pairs
+
+    def _is_session_active(self):
+        """
+        Session Filter: Avoids high-noise/low-liquidity periods.
+        Focuses on major market overlap (UTC 08:00 to 20:00).
+        """
+        now_utc = datetime.now(pytz.UTC)
+        hour = now_utc.hour
+        # Allow trading from 08:00 UTC (London Open) to 20:00 UTC (Post NY Close)
+        return 8 <= hour < 20
 
     def evaluate_trade(self, symbol, df, balance):
         """
@@ -22,6 +39,9 @@ class Brain:
         """
         if not self.is_halal(symbol):
             return self._hold(symbol, "Non-Halal Asset")
+
+        if not self._is_session_active():
+            return self._hold(symbol, "Outside Trading Session")
 
         if df is None or len(df) < config.MA_SLOW:
             return self._hold(symbol, "Insufficient Data")
@@ -89,7 +109,9 @@ class Brain:
             return self._hold(symbol, f"Trend Fail: MA50 ({current_ma50:.2f}) <= MA200 ({current_ma200:.2f})")
 
         action = "HOLD"
-        if score >= config.SCORE_THRESHOLD + 1:
+        if score in self.disabled_scores:
+            action = "HOLD (DISABLED BY OPTIMIZER)"
+        elif score >= config.SCORE_THRESHOLD + 1:
             action = "STRONG BUY"
         elif score >= config.SCORE_THRESHOLD:
             action = "BUY"

@@ -1,6 +1,7 @@
 import time
 import logging
 import math
+from decimal import Decimal, ROUND_FLOOR
 from pybit.unified_trading import HTTP
 import config
 
@@ -44,30 +45,39 @@ class BybitHandler:
         return self.precisions[symbol]
 
     def format_quantity(self, qty, symbol):
-        """Ensures quantity matches Bybit's precision rules."""
+        """Ensures quantity matches Bybit's precision rules using Decimal."""
+        if qty is None: return None
         info = self.get_symbol_info(symbol)
-        step = info["qty_step"]
-        precision = self._get_precision(step)
-        return float(round(math.floor(float(qty) / step + 0.0000000001) * step, precision))
+        step = Decimal(str(info["qty_step"]))
+        val = Decimal(str(qty))
+
+        # Round down to the nearest step
+        rounded = (val // step) * step
+        return float(rounded)
 
     def format_price(self, price, symbol):
-        """Ensures price matches Bybit's tick size rules."""
+        """Ensures price matches Bybit's tick size rules using Decimal."""
+        if price is None: return None
         info = self.get_symbol_info(symbol)
-        step = info["price_step"]
-        precision = self._get_precision(step)
-        return float(round(math.floor(float(price) / step + 0.0000000001) * step, precision))
+        step = Decimal(str(info["price_step"]))
+        val = Decimal(str(price))
+
+        # Round down to the nearest step
+        rounded = (val // step) * step
+        return float(rounded)
 
     def _get_precision(self, step):
-        """Helper to get decimal places from step size, handling scientific notation."""
-        step_str = "{:.10f}".format(float(step)).rstrip('0')
+        """Helper to get decimal places from step size, handling scientific notation correctly."""
+        step_str = format(Decimal(str(step)), 'f').rstrip('0')
         if "." not in step_str:
             return 0
         return len(step_str.split(".")[1])
 
     def _to_str(self, val, step):
-        """Formats value to string with correct decimal places to avoid scientific notation or floating artifacts."""
+        """Formats value to string with correct decimal places using Decimal for precision."""
+        if val is None: return ""
         precision = self._get_precision(step)
-        return "{:0.{}f}".format(val, precision)
+        return "{:0.{}f}".format(float(val), precision)
 
     def get_balance(self):
         """Fetches USDT balance across possible account types (Unified, Funding, Spot)."""
@@ -143,10 +153,10 @@ class BybitHandler:
     def place_market_order(self, symbol, qty, sl, tp):
         """
         Hardened Market Order Execution (Production Debug Version).
-        Bypasses price mismatch issues to confirm API and balance connectivity.
+        Switches to Market Entry and Market TP/SL for maximum fill reliability.
         """
         try:
-            # 1. Fetch live ticker for metadata (even if Market order doesn't need it for entry)
+            # 1. Fetch live ticker for metadata
             tickers = self.session.get_tickers(category=self.category, symbol=symbol)
             ticker = tickers['result']['list'][0]
             price = float(ticker['ask1Price'])
@@ -154,7 +164,6 @@ class BybitHandler:
             # 2. Safety Formatting
             info = self.get_symbol_info(symbol)
             qty_val = self.format_quantity(qty, symbol)
-            price_val = self.format_price(price, symbol)
             
             sl_val = self.format_price(sl, symbol) if sl else None
             tp_val = self.format_price(tp, symbol) if tp else None
@@ -162,17 +171,16 @@ class BybitHandler:
             if qty_val <= 0:
                 return {"success": False, "error": "Invalid formatted qty (0)"}
 
-            # 3. Place LIMIT Order (Hardened)
+            # 3. Place MARKET Order (Hardened)
             params = {
                 "category": self.category,
                 "symbol": symbol,
                 "side": "Buy",
-                "orderType": "Limit",
+                "orderType": "Market",
                 "qty": self._to_str(qty_val, info["qty_step"]),
-                "price": self._to_str(price_val, info["price_step"]),
-                "timeInForce": "GTC", # Good Till Cancelled
+                "marketUnit": "baseCoin", # Use baseCoin to specify quantity in symbol (e.g., BTC)
                 "isLeverage": 0,
-                "tpOrderType": "Limit",
+                "tpOrderType": "Market",
                 "slOrderType": "Market"
             }
             if tp_val:
@@ -188,7 +196,7 @@ class BybitHandler:
                 return {
                     "success": True,
                     "order_id": res['result']['orderId'],
-                    "price": price_val,
+                    "price": price,
                     "qty": qty_val
                 }
             else:
