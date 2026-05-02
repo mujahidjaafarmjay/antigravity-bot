@@ -1,5 +1,6 @@
 import time
 import logging
+import math
 from pybit.unified_trading import HTTP
 import config
 
@@ -17,10 +18,56 @@ class BybitHandler:
         )
         self.category = "spot"
         self.logger = logging.getLogger(__name__)
+        self.precisions = {} # Cache for symbol rules
 
-    def format_quantity(self, qty, step=0.01):
+    def get_symbol_info(self, symbol):
+        """Fetches and caches precision rules for a symbol."""
+        if symbol in self.precisions:
+            return self.precisions[symbol]
+
+        try:
+            res = self.session.get_instruments_info(category=self.category, symbol=symbol)
+            if res.get("retCode") == 0:
+                info = res["result"]["list"][0]
+                self.precisions[symbol] = {
+                    "qty_step": float(info["lotSizeFilter"]["basePrecision"]),
+                    "price_step": float(info["priceFilter"]["tickSize"])
+                }
+                return self.precisions[symbol]
+            else:
+                self.logger.error(f"Bybit API error fetching instrument info for {symbol}: {res.get('retMsg')}")
+        except Exception as e:
+            self.logger.error(f"Exception fetching instrument info for {symbol}: {e}")
+
+        # Fallback defaults cached to avoid repeated failing API calls
+        self.precisions[symbol] = {"qty_step": 0.01, "price_step": 0.0001}
+        return self.precisions[symbol]
+
+    def format_quantity(self, qty, symbol):
         """Ensures quantity matches Bybit's precision rules."""
-        return float(int(float(qty) / step) * step)
+        info = self.get_symbol_info(symbol)
+        step = info["qty_step"]
+        precision = self._get_precision(step)
+        return float(round(math.floor(float(qty) / step + 0.0000000001) * step, precision))
+
+    def format_price(self, price, symbol):
+        """Ensures price matches Bybit's tick size rules."""
+        info = self.get_symbol_info(symbol)
+        step = info["price_step"]
+        precision = self._get_precision(step)
+        return float(round(math.floor(float(price) / step + 0.0000000001) * step, precision))
+
+    def _get_precision(self, step):
+        """Helper to get decimal places from step size, handling scientific notation."""
+        step_str = "{:.10f}".format(float(step)).rstrip('0')
+        if "." not in step_str:
+            return 0
+        return len(step_str.split(".")[1])
+
+    def _to_str(self, val, step):
+        """Formats value to string with correct decimal places to avoid scientific notation or floating artifacts."""
+        precision = self._get_precision(step)
+        return "{:0.{}f}".format(val, precision)
 
     def get_balance(self):
         """Fetches USDT balance across possible account types (Unified, Funding, Spot)."""
@@ -101,26 +148,35 @@ class BybitHandler:
             price = float(ticker['ask1Price'])
 
             # 2. Safety Formatting
-            qty = self.format_quantity(qty, step=0.01) # Default step for most spot pairs
+            info = self.get_symbol_info(symbol)
+            qty_val = self.format_quantity(qty, symbol)
+            price_val = self.format_price(price, symbol)
             
-            if qty <= 0:
+            sl_val = self.format_price(sl, symbol) if sl else None
+            tp_val = self.format_price(tp, symbol) if tp else None
+
+            if qty_val <= 0:
                 return {"success": False, "error": "Invalid formatted qty (0)"}
 
             # 3. Place LIMIT Order (Hardened)
-            res = self.session.place_order(
-                category=self.category,
-                symbol=symbol,
-                side="Buy",
-                orderType="Limit",
-                qty=str(qty),
-                price=str(price),
-                timeInForce="GTC", # Good Till Cancelled
-                isLeverage=0,
-                takeProfit=str(tp),
-                stopLoss=str(sl),
-                tpOrderType="Limit",
-                slOrderType="Market"
-            )
+            params = {
+                "category": self.category,
+                "symbol": symbol,
+                "side": "Buy",
+                "orderType": "Limit",
+                "qty": self._to_str(qty_val, info["qty_step"]),
+                "price": self._to_str(price_val, info["price_step"]),
+                "timeInForce": "GTC", # Good Till Cancelled
+                "isLeverage": 0,
+                "tpOrderType": "Limit",
+                "slOrderType": "Market"
+            }
+            if tp_val:
+                params["takeProfit"] = self._to_str(tp_val, info["price_step"])
+            if sl_val:
+                params["stopLoss"] = self._to_str(sl_val, info["price_step"])
+
+            res = self.session.place_order(**params)
 
             self.logger.info(f"BYBIT RAW RESPONSE: {res}")
 
@@ -128,8 +184,8 @@ class BybitHandler:
                 return {
                     "success": True,
                     "order_id": res['result']['orderId'],
-                    "price": price,
-                    "qty": qty
+                    "price": price_val,
+                    "qty": qty_val
                 }
             else:
                 return {
