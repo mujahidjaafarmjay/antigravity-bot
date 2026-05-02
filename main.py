@@ -74,7 +74,12 @@ class TradingBot:
         logger.info(f"State recovered. Daily PnL: ${self.daily_pnl:.2f}, Halted: {self.is_halted}, Balance: ${self.starting_balance:.2f}, Active Trades: {len(self.active_trades)}")
 
     def _run_optimization(self):
-        """Fetches data and runs strategy optimizer and pair ranker."""
+        """Fetches data and runs strategy optimizer and pair ranker (Respects CALIBRATION_MODE)."""
+        if config.CALIBRATION_MODE:
+            logger.info("Bot in CALIBRATION MODE. Tier 2 Engine (Optimizer/Ranker) suspended.")
+            self.brain.set_disabled_scores(set())
+            return
+
         logger.info("Running Tier 2 Strategy Optimization...")
 
         # 1. Score-Level Optimization
@@ -178,11 +183,15 @@ class TradingBot:
                     time.sleep(config.BALANCE_CACHE_SECONDS)
                     continue
 
-                # Check Daily Loss
-                if self.risk.check_daily_loss(self.daily_pnl, self.starting_balance):
+                # Check Daily Loss (Percentage and Hard USDT limit)
+                is_perc_loss = self.risk.check_daily_loss(self.daily_pnl, self.starting_balance)
+                is_usdt_loss = self.daily_pnl <= -config.MAX_DAILY_LOSS_USDT
+
+                if is_perc_loss or is_usdt_loss:
                     self.is_halted = True
                     self.sheets.update_meta(self.daily_pnl, self.is_halted)
-                    self.telegram.alert_critical("Daily loss limit reached. Trading halted.")
+                    reason = "Percentage Limit" if is_perc_loss else f"USDT Limit (${config.MAX_DAILY_LOSS_USDT})"
+                    self.telegram.alert_critical(f"Daily loss limit reached ({reason}). Trading halted.")
                     continue
 
                 # 2. Monitor Active Trades (TP/SL)
@@ -255,13 +264,15 @@ class TradingBot:
                                 logger.warning(f"PairRanker: Skipping {symbol} due to toxic performance history.")
                                 continue
 
-                            # 5. Calculate Qty with Risk Scaling
-                            symbol_weight = self.ranker.get_symbol_weight(symbol)
+                            # 5. Calculate Qty with Risk Scaling (Respects CALIBRATION_MODE)
+                            symbol_weight = 1.0 if config.CALIBRATION_MODE else self.ranker.get_symbol_weight(symbol)
+                            score_scaling = 3 if config.CALIBRATION_MODE else decision['score']
+
                             qty, qty_reason = self.risk.calculate_position(
                                 balance,
                                 exec_price,
                                 decision['stop_loss'],
-                                score=decision['score'],
+                                score=score_scaling,
                                 symbol_weight=symbol_weight
                             )
                             if qty > 0:
