@@ -96,12 +96,16 @@ class BybitHandler:
         return total_balance
 
     def get_ticker(self, symbol):
-        """Fetches the latest price for a symbol."""
+        """Fetches the latest price for a symbol, ensuring a float is returned."""
         try:
             res = self.session.get_tickers(category=self.category, symbol=symbol)
-            return float(res['result']['list'][0]['lastPrice'])
+            if res.get("retCode") == 0 and res.get("result", {}).get("list"):
+                return float(res['result']['list'][0]['lastPrice'])
+            else:
+                self.logger.error(f"Bybit API error fetching ticker for {symbol}: {res.get('retMsg')}")
+                return None
         except Exception as e:
-            self.logger.error(f"Error fetching ticker for {symbol}: {e}")
+            self.logger.error(f"Exception fetching ticker for {symbol}: {e}")
             return None
 
     def get_market_data(self, symbol):

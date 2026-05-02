@@ -46,6 +46,7 @@ class TradingBot:
         self.starting_balance = 0.0
         self.reported_signals = {} # Track last score sent to Telegram
         self.execution_lock = {} # Prevent duplicate execution attempts
+        self.active_trades = {} # Track open trades for P&L logging
         self.instance_id = datetime.now().strftime("%H%M%S") # Unique ID for this run
         
         self._recover_state()
@@ -57,9 +58,74 @@ class TradingBot:
         self.daily_pnl = meta.get('daily_net_pnl', 0.0)
         self.is_halted = meta.get('is_halted', False)
         
+        # Recover Active Trades
+        self.active_trades = self.sheets.get_active_trades()
+
         # Get starting balance
         self.starting_balance = self.bybit.get_balance()
-        logger.info(f"State recovered. Daily PnL: ${self.daily_pnl:.2f}, Halted: {self.is_halted}, Balance: ${self.starting_balance:.2f}")
+        logger.info(f"State recovered. Daily PnL: ${self.daily_pnl:.2f}, Halted: {self.is_halted}, Balance: ${self.starting_balance:.2f}, Active Trades: {len(self.active_trades)}")
+
+    def _monitor_active_trades(self):
+        """Checks if active trades hit TP or SL."""
+        if not self.active_trades:
+            return
+
+        logger.info(f"Monitoring {len(self.active_trades)} active trades...")
+        for symbol, trade in list(self.active_trades.items()):
+            try:
+                current_price = self.bybit.get_ticker(symbol)
+                if not current_price:
+                    continue
+
+                outcome = None
+                if current_price >= trade['take_profit']:
+                    outcome = "WIN"
+                    exit_price = trade['take_profit']
+                elif current_price <= trade['stop_loss']:
+                    outcome = "LOSS"
+                    exit_price = trade['stop_loss']
+
+                if outcome:
+                    # Calculate PnL (Simplified Spot calculation)
+                    # PnL = (Exit - Entry) * Qty
+                    gross_pnl = (exit_price - trade['entry']) * trade['qty']
+
+                    # Estimate Fees (Bybit Spot: 0.1% for both entry and exit)
+                    entry_fee = (trade['entry'] * trade['qty']) * 0.001
+                    exit_fee = (exit_price * trade['qty']) * 0.001
+                    total_fees = entry_fee + exit_fee
+                    net_pnl = gross_pnl - total_fees
+
+                    # Update Daily PnL
+                    self.daily_pnl += net_pnl
+
+                    # Log to Sheets
+                    self.sheets.log_outcome(
+                        symbol=symbol,
+                        score=trade['score'],
+                        entry=trade['entry'],
+                        sl=trade['stop_loss'],
+                        tp=trade['take_profit'],
+                        outcome=outcome,
+                        pnl=net_pnl,
+                        fees=total_fees,
+                        mode=config.MODE
+                    )
+
+                    # Notify Telegram
+                    emoji = "💰" if outcome == "WIN" else "📉"
+                    self.telegram.send_message(
+                        f"{emoji} <b>TRADE CLOSED: {symbol}</b>\n"
+                        f"Outcome: {outcome}\n"
+                        f"Net PnL: ${net_pnl:.2f}\n"
+                        f"Score: {trade['score']}"
+                    )
+
+                    # Remove from local memory
+                    del self.active_trades[symbol]
+
+            except Exception as e:
+                logger.error(f"Error monitoring {symbol}: {e}")
 
     def run(self):
         """Main bot loop."""
@@ -86,7 +152,10 @@ class TradingBot:
                     self.telegram.alert_critical("Daily loss limit reached. Trading halted.")
                     continue
 
-                # 2. Iterate through Halal Pairs
+                # 2. Monitor Active Trades (TP/SL)
+                self._monitor_active_trades()
+
+                # 3. Iterate through Halal Pairs
                 for symbol in config.HALAL_PAIRS:
                     # Check Cooldown
                     if symbol in self.cooldowns:
@@ -179,7 +248,19 @@ class TradingBot:
                                         f"ID: {order_id}"
                                     )
                                     
-                                    # Log to Sheets
+                                    # Active Trade Tracking
+                                    new_trade = {
+                                        "symbol": symbol,
+                                        "score": decision['score'],
+                                        "entry": result['price'],
+                                        "stop_loss": decision['stop_loss'],
+                                        "take_profit": decision['take_profit'],
+                                        "qty": result['qty']
+                                    }
+                                    self.active_trades[symbol] = new_trade
+                                    self.sheets.add_active_trade(new_trade)
+
+                                    # Log to Sheets (Signal Log)
                                     trade_log = decision.copy()
                                     trade_log['qty'] = result['qty']
                                     trade_log['entry'] = result['price']
