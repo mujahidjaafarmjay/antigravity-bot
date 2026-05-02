@@ -152,44 +152,53 @@ class BybitHandler:
 
     def place_market_order(self, symbol, qty, sl, tp):
         """
-        Hardened Market Order Execution (Production Debug Version).
-        Switches to Market Entry and Market TP/SL for maximum fill reliability.
+        Production-Ready Market Execution.
+        Uses Market Entry, Market TP, and Market SL for maximum reliability on small accounts.
         """
+        if config.TRADING_MODE == "paper":
+            self.logger.info(f"[PAPER] Simulating MARKET BUY for {symbol} | Qty: {qty}")
+            return {
+                "success": True,
+                "order_id": f"paper_{int(time.time())}",
+                "price": self.get_ticker(symbol) or 0.0,
+                "qty": qty
+            }
+
         try:
-            # 1. Fetch live ticker for metadata
+            # 1. Fetch metadata and ticker
             tickers = self.session.get_tickers(category=self.category, symbol=symbol)
             ticker = tickers['result']['list'][0]
             price = float(ticker['ask1Price'])
+            info = self.get_symbol_info(symbol)
 
             # 2. Safety Formatting
-            info = self.get_symbol_info(symbol)
             qty_val = self.format_quantity(qty, symbol)
             
-            sl_val = self.format_price(sl, symbol) if sl else None
-            tp_val = self.format_price(tp, symbol) if tp else None
+            # Minimum Size Check ($6 safe floor)
+            if (qty_val * price) < config.MIN_TRADE_USDT:
+                return {"success": False, "error": f"Size too small (${qty_val * price:.2f})"}
 
-            if qty_val <= 0:
-                return {"success": False, "error": "Invalid formatted qty (0)"}
-
-            # 3. Place MARKET Order (Hardened)
             params = {
                 "category": self.category,
                 "symbol": symbol,
                 "side": "Buy",
                 "orderType": "Market",
                 "qty": self._to_str(qty_val, info["qty_step"]),
-                "marketUnit": "baseCoin", # Use baseCoin to specify quantity in symbol (e.g., BTC)
-                "isLeverage": 0,
-                "tpOrderType": "Market",
-                "slOrderType": "Market"
+                "marketUnit": "baseCoin"
             }
-            if tp_val:
+
+            # ✅ TP/SL must be MARKET (not LIMIT) to avoid Error 170322
+            if tp:
+                tp_val = self.format_price(tp, symbol)
                 params["takeProfit"] = self._to_str(tp_val, info["price_step"])
-            if sl_val:
+                params["tpOrderType"] = "Market"
+
+            if sl:
+                sl_val = self.format_price(sl, symbol)
                 params["stopLoss"] = self._to_str(sl_val, info["price_step"])
+                params["slOrderType"] = "Market"
 
             res = self.session.place_order(**params)
-
             self.logger.info(f"BYBIT RAW RESPONSE: {res}")
 
             if res.get("retCode") == 0:

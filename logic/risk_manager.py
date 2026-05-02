@@ -49,7 +49,7 @@ class RiskManager:
         if actual_notional > max_notional:
             qty = max_notional / entry_price
         # 5. Min Position Size Constraint (Bybit requires ~$5 minimum notional)
-        if (qty * entry_price) < 5.0:
+        if (qty * entry_price) < config.MIN_TRADE_USDT:
             return 0, "SMALL_TRADE_WATCH"
             
         return round(qty, 6), "OK"
