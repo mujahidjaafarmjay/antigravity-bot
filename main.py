@@ -156,6 +156,9 @@ class TradingBot:
                     # Remove from local memory
                     del self.active_trades[symbol]
 
+                    # Set mandatory cooldown to prevent immediate re-entry
+                    self.cooldowns[symbol] = datetime.now() + timedelta(minutes=config.COOLDOWN_MINUTES)
+
                     # Trigger Optimization periodically (every 10 trades)
                     self.closed_trades_count += 1
                     if self.closed_trades_count >= 10:
@@ -199,6 +202,10 @@ class TradingBot:
 
                 # 3. Iterate through Halal Pairs
                 for symbol in config.HALAL_PAIRS:
+                    # Prevent multiple active trades for same symbol (Duplicate Guard)
+                    if symbol in self.active_trades:
+                        continue
+
                     # Check Cooldown
                     if symbol in self.cooldowns:
                         if datetime.now() < self.cooldowns[symbol]:
@@ -243,16 +250,18 @@ class TradingBot:
                             continue
 
                         if valid:
-                            # 1. Global Trade Limit Check
+                            # 1. Global Trade Limit Check (Exchange orders + Local tracking)
                             open_orders = self.bybit.get_open_orders()
-                            if len(open_orders) >= config.MAX_OPEN_TRADES:
+                            total_active = len(open_orders) + len([s for s in self.active_trades if s not in [o['symbol'] for o in open_orders]])
+
+                            if total_active >= config.MAX_OPEN_TRADES:
                                 logger.warning(f"Max trades reached ({config.MAX_OPEN_TRADES}). Skipping {symbol}.")
                                 continue
 
                             # 2. Per-Symbol Check (Secondary Guard)
                             symbol_orders = [o for o in open_orders if o['symbol'] == symbol]
-                            if symbol_orders:
-                                logger.info(f"Skipping {symbol}: Already has open orders.")
+                            if symbol_orders or symbol in self.active_trades:
+                                logger.info(f"Skipping {symbol}: Already has active trades/orders.")
                                 continue
 
                             # 3. Use LIVE Ticker for Execution Price (not candle data)
