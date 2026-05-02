@@ -153,10 +153,10 @@ class BybitHandler:
     def place_market_order(self, symbol, qty, sl, tp):
         """
         Hardened Market Order Execution (Production Debug Version).
-        Bypasses price mismatch issues to confirm API and balance connectivity.
+        Switches to Market Entry and Market TP/SL for maximum fill reliability.
         """
         try:
-            # 1. Fetch live ticker for metadata (even if Market order doesn't need it for entry)
+            # 1. Fetch live ticker for metadata
             tickers = self.session.get_tickers(category=self.category, symbol=symbol)
             ticker = tickers['result']['list'][0]
             price = float(ticker['ask1Price'])
@@ -164,7 +164,6 @@ class BybitHandler:
             # 2. Safety Formatting
             info = self.get_symbol_info(symbol)
             qty_val = self.format_quantity(qty, symbol)
-            price_val = self.format_price(price, symbol)
             
             sl_val = self.format_price(sl, symbol) if sl else None
             tp_val = self.format_price(tp, symbol) if tp else None
@@ -172,17 +171,16 @@ class BybitHandler:
             if qty_val <= 0:
                 return {"success": False, "error": "Invalid formatted qty (0)"}
 
-            # 3. Place LIMIT Order (Hardened)
+            # 3. Place MARKET Order (Hardened)
             params = {
                 "category": self.category,
                 "symbol": symbol,
                 "side": "Buy",
-                "orderType": "Limit",
+                "orderType": "Market",
                 "qty": self._to_str(qty_val, info["qty_step"]),
-                "price": self._to_str(price_val, info["price_step"]),
-                "timeInForce": "GTC", # Good Till Cancelled
+                "marketUnit": "baseCoin", # Use baseCoin to specify quantity in symbol (e.g., BTC)
                 "isLeverage": 0,
-                "tpOrderType": "Limit",
+                "tpOrderType": "Market",
                 "slOrderType": "Market"
             }
             if tp_val:
@@ -198,7 +196,7 @@ class BybitHandler:
                 return {
                     "success": True,
                     "order_id": res['result']['orderId'],
-                    "price": price_val,
+                    "price": price,
                     "qty": qty_val
                 }
             else:
