@@ -142,12 +142,15 @@ class SheetsPersistence:
             self.logger.error(f"Error adding active trade to Sheets: {e}")
 
     def remove_active_trade(self, symbol):
-        """Removes a trade from the ActiveTrades tab."""
+        """Removes all trades for a symbol from the ActiveTrades tab to ensure clean state."""
         if not self.active_tab: return
         try:
-            cell = self.active_tab.find(symbol)
-            if cell:
-                self.active_tab.delete_rows(cell.row)
+            # Delete in reverse to not affect row indices
+            cells = self.active_tab.findall(symbol)
+            if cells:
+                rows_to_delete = sorted([c.row for c in cells], reverse=True)
+                for row in rows_to_delete:
+                    self.active_tab.delete_rows(row)
         except Exception as e:
             self.logger.error(f"Error removing active trade from Sheets: {e}")
 
