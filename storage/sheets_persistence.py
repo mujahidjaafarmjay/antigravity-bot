@@ -41,15 +41,33 @@ class SheetsPersistence:
             self.logger.error(f"Error connecting to Google Sheets: {e}")
 
     def _setup_tabs(self):
-        """Creates 'Trades' and 'BotMeta' tabs if they don't exist."""
+        """Creates 'Trades', 'Performance', 'ActiveTrades', and 'BotMeta' tabs if they don't exist."""
         try:
-            # Trades Tab
+            # Trades Tab (Signal Log)
             try:
                 self.trades_tab = self.sheet.worksheet("Trades")
             except gspread.WorksheetNotFound:
                 self.trades_tab = self.sheet.add_worksheet("Trades", rows=1000, cols=10)
                 self.trades_tab.append_row([
                     "Timestamp", "Symbol", "Action", "Score", "Entry", "SL", "TP", "Qty", "Reason", "Sharia_Status"
+                ])
+
+            # Performance Tab (Outcome Log)
+            try:
+                self.perf_tab = self.sheet.worksheet("Performance")
+            except gspread.WorksheetNotFound:
+                self.perf_tab = self.sheet.add_worksheet("Performance", rows=2000, cols=10)
+                self.perf_tab.append_row([
+                    "Timestamp", "Symbol", "Score", "Entry", "SL", "TP", "Outcome", "PnL", "Fees", "Mode"
+                ])
+
+            # Active Trades Tab (for recovery)
+            try:
+                self.active_tab = self.sheet.worksheet("ActiveTrades")
+            except gspread.WorksheetNotFound:
+                self.active_tab = self.sheet.add_worksheet("ActiveTrades", rows=100, cols=8)
+                self.active_tab.append_row([
+                    "Symbol", "Score", "Entry", "SL", "TP", "Qty", "Mode", "Timestamp"
                 ])
 
             # BotMeta Tab
@@ -67,7 +85,7 @@ class SheetsPersistence:
             self.logger.error(f"Error setting up Sheets tabs: {e}")
 
     def log_trade(self, trade_data):
-        """Logs a trade to the 'Trades' tab."""
+        """Logs a signal/entry to the 'Trades' tab."""
         if not self.trades_tab: return
         try:
             self.trades_tab.append_row([
@@ -84,6 +102,75 @@ class SheetsPersistence:
             ])
         except Exception as e:
             self.logger.error(f"Error logging trade to Sheets: {e}")
+
+    def log_outcome(self, symbol, score, entry, sl, tp, outcome, pnl, fees, mode):
+        """Logs a finished trade outcome to the 'Performance' tab."""
+        if not self.perf_tab: return
+        try:
+            self.perf_tab.append_row([
+                datetime.now().strftime("%Y-%m-%d %H:%M:%S"),
+                symbol,
+                score,
+                entry,
+                sl,
+                tp,
+                outcome,
+                pnl,
+                fees,
+                mode
+            ])
+            # Also remove from ActiveTrades
+            self.remove_active_trade(symbol)
+        except Exception as e:
+            self.logger.error(f"Error logging outcome to Sheets: {e}")
+
+    def add_active_trade(self, trade):
+        """Adds a trade to the ActiveTrades tab."""
+        if not self.active_tab: return
+        try:
+            self.active_tab.append_row([
+                trade['symbol'],
+                trade['score'],
+                trade['entry'],
+                trade['stop_loss'],
+                trade['take_profit'],
+                trade['qty'],
+                config.MODE,
+                datetime.now().strftime("%Y-%m-%d %H:%M:%S")
+            ])
+        except Exception as e:
+            self.logger.error(f"Error adding active trade to Sheets: {e}")
+
+    def remove_active_trade(self, symbol):
+        """Removes a trade from the ActiveTrades tab."""
+        if not self.active_tab: return
+        try:
+            cell = self.active_tab.find(symbol)
+            if cell:
+                self.active_tab.delete_rows(cell.row)
+        except Exception as e:
+            self.logger.error(f"Error removing active trade from Sheets: {e}")
+
+    def get_active_trades(self):
+        """Recovers active trades from Sheets."""
+        if not self.active_tab: return {}
+        try:
+            records = self.active_tab.get_all_records()
+            active = {}
+            for r in records:
+                active[r['Symbol']] = {
+                    "symbol": r['Symbol'],
+                    "score": r['Score'],
+                    "entry": float(r['Entry']),
+                    "stop_loss": float(r['SL']),
+                    "take_profit": float(r['TP']),
+                    "qty": float(r['Qty']),
+                    "mode": r['Mode']
+                }
+            return active
+        except Exception as e:
+            self.logger.error(f"Error getting active trades from Sheets: {e}")
+            return {}
 
     def get_bot_meta(self, key):
         """Retrieves a specific metadata value."""
