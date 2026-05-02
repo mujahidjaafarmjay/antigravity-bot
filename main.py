@@ -5,6 +5,7 @@ import config
 from exchange.bybit_handler import BybitHandler
 from logic.brain import Brain
 from logic.risk_manager import RiskManager
+from logic.optimizer import StrategyOptimizer
 from storage.sheets_persistence import SheetsPersistence
 from notifications.telegram_sender import TelegramSender
 from notifications.command_handler import TelegramCommandHandler
@@ -36,6 +37,7 @@ class TradingBot:
         self.bybit = BybitHandler()
         self.brain = Brain()
         self.risk = RiskManager()
+        self.optimizer = StrategyOptimizer(min_trades_required=15)
         self.sheets = SheetsPersistence()
         self.telegram = TelegramSender()
         self.cmd_handler = TelegramCommandHandler(self.telegram, self.bybit, self.sheets, self.risk)
@@ -61,9 +63,25 @@ class TradingBot:
         # Recover Active Trades
         self.active_trades = self.sheets.get_active_trades()
 
+        # Run Initial Optimization
+        self._run_optimization()
+
         # Get starting balance
         self.starting_balance = self.bybit.get_balance()
         logger.info(f"State recovered. Daily PnL: ${self.daily_pnl:.2f}, Halted: {self.is_halted}, Balance: ${self.starting_balance:.2f}, Active Trades: {len(self.active_trades)}")
+
+    def _run_optimization(self):
+        """Fetches data and runs strategy optimizer."""
+        logger.info("Running Strategy Optimizer...")
+        summary = self.sheets.get_performance_summary()
+        disabled = self.optimizer.analyze_and_optimize(summary)
+
+        if disabled:
+            logger.warning(f"Strategy Optimizer has DISABLED scores: {disabled}")
+            self.telegram.send_message(f"🔄 <b>Strategy Optimized</b>\nDisabled Scores: {list(disabled)}")
+
+        # Pass disabled scores to brain
+        self.brain.set_disabled_scores(disabled)
 
     def _monitor_active_trades(self):
         """Checks if active trades hit TP or SL."""
@@ -123,6 +141,9 @@ class TradingBot:
 
                     # Remove from local memory
                     del self.active_trades[symbol]
+
+                    # Trigger Optimization check after a trade close
+                    self._run_optimization()
 
             except Exception as e:
                 logger.error(f"Error monitoring {symbol}: {e}")

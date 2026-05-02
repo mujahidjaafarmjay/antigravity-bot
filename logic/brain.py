@@ -10,6 +10,11 @@ class Brain:
 
     def __init__(self):
         self.halal_pairs = config.HALAL_PAIRS
+        self.disabled_scores = set()
+
+    def set_disabled_scores(self, scores):
+        """Updates the set of disabled scores based on optimizer feedback."""
+        self.disabled_scores = set(scores)
 
     def is_halal(self, symbol):
         """Checks if the symbol is in the Sharia-compliant whitelist."""
@@ -89,7 +94,9 @@ class Brain:
             return self._hold(symbol, f"Trend Fail: MA50 ({current_ma50:.2f}) <= MA200 ({current_ma200:.2f})")
 
         action = "HOLD"
-        if score >= config.SCORE_THRESHOLD + 1:
+        if score in self.disabled_scores:
+            action = "HOLD (DISABLED BY OPTIMIZER)"
+        elif score >= config.SCORE_THRESHOLD + 1:
             action = "STRONG BUY"
         elif score >= config.SCORE_THRESHOLD:
             action = "BUY"
