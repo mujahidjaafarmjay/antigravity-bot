@@ -14,6 +14,12 @@ CHAT_ID        = os.environ.get("TELEGRAM_CHAT_ID", "").strip()
 # ── Mode ─────────────────────────────────────────────────────
 MODE    = os.environ.get("MODE", "paper").strip().lower()
 TESTNET = MODE == "testnet"
+TRADING_MODE = "live" if MODE == "live" else "paper"
+
+# ── Production Safety & Calibration ──────────────────────────
+ENABLE_LIVE_TRADING  = os.environ.get("ENABLE_LIVE_TRADING", "False").lower() == "true"
+CALIBRATION_MODE      = os.environ.get("CALIBRATION_MODE", "True").lower() == "true"
+MAX_DAILY_LOSS_USDT   = float(os.environ.get("MAX_DAILY_LOSS_USDT", "3.0"))
 
 # ── Google Sheets ─────────────────────────────────────────────
 GOOGLE_SHEETS_CREDENTIALS = os.environ.get("GOOGLE_SHEETS_CREDENTIALS", "").strip()

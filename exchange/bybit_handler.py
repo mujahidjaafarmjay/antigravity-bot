@@ -155,7 +155,10 @@ class BybitHandler:
         Production-Ready Market Execution.
         Uses Market Entry, Market TP, and Market SL for maximum reliability on small accounts.
         """
-        if config.TRADING_MODE == "paper":
+        # Hard Live Safety Switch
+        is_paper = config.TRADING_MODE == "paper" or not config.ENABLE_LIVE_TRADING
+
+        if is_paper:
             self.logger.info(f"[PAPER] Simulating MARKET BUY for {symbol} | Qty: {qty}")
             return {
                 "success": True,
