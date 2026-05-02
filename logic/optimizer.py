@@ -31,13 +31,14 @@ class StrategyOptimizer:
             self.logger.info(f"Analyzing Score {score}: {trades} trades, Expectancy: {expectancy:.4f}, PF: {profit_factor:.2f}")
 
             # Optimization Rules:
-            # 1. Negative Expectancy after enough trades -> Disable
+            # 1. Statistical Edge Check (Expectancy & Profit Factor)
             if trades >= self.min_trades:
-                if expectancy <= 0 or profit_factor < 1.0:
-                    self.logger.warning(f"🚫 Score {score} identified as UNPROFITABLE. Disabling.")
+                # PF < 1.1 or Expectancy <= 0 are indicators of a losing or barely-breakeven system
+                if expectancy <= 0 or profit_factor < 1.1:
+                    self.logger.warning(f"🚫 Score {score} failed statistical edge check (Exp: {expectancy:.4f}, PF: {profit_factor:.2f}). Disabling.")
                     new_disabled.add(score)
                 else:
-                    self.logger.info(f"✅ Score {score} remains ENABLED (Expectancy: {expectancy:.4f}).")
+                    self.logger.info(f"✅ Score {score} remains ENABLED (Expectancy: {expectancy:.4f}, PF: {profit_factor:.2f}).")
             else:
                 self.logger.info(f"⏳ Score {score} still in validation phase ({trades}/{self.min_trades} trades).")
 

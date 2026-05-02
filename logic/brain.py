@@ -1,6 +1,8 @@
 import pandas as pd
 import numpy as np
 import config
+from datetime import datetime
+import pytz
 
 class Brain:
     """
@@ -20,6 +22,16 @@ class Brain:
         """Checks if the symbol is in the Sharia-compliant whitelist."""
         return symbol in self.halal_pairs
 
+    def _is_session_active(self):
+        """
+        Session Filter: Avoids high-noise/low-liquidity periods.
+        Focuses on major market overlap (UTC 08:00 to 20:00).
+        """
+        now_utc = datetime.now(pytz.UTC)
+        hour = now_utc.hour
+        # Allow trading from 08:00 UTC (London Open) to 20:00 UTC (Post NY Close)
+        return 8 <= hour < 20
+
     def evaluate_trade(self, symbol, df, balance):
         """
         Core strategy logic.
@@ -27,6 +39,9 @@ class Brain:
         """
         if not self.is_halal(symbol):
             return self._hold(symbol, "Non-Halal Asset")
+
+        if not self._is_session_active():
+            return self._hold(symbol, "Outside Trading Session")
 
         if df is None or len(df) < config.MA_SLOW:
             return self._hold(symbol, "Insufficient Data")

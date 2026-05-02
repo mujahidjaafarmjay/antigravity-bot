@@ -10,19 +10,29 @@ class RiskManager:
         self.max_open_trades = config.MAX_OPEN_TRADES
         self.daily_loss_limit = config.DAILY_LOSS_LIMIT_PERCENT
 
-    def calculate_position(self, balance, entry_price, stop_loss):
+    def calculate_position(self, balance, entry_price, stop_loss, score=3, symbol_weight=1.0):
         """
-        Calculates the quantity based on dynamic risk rules.
+        Calculates the quantity based on dynamic risk rules, score confluence, and symbol rank.
         """
         if balance <= 0:
             return 0, "Invalid Balance"
 
-        # 1. Dynamic Risk per Trade
+        # 1. Base Risk per Trade
         risk_percent = 0.02 # Default 2%
         if balance < 30:
             risk_percent = 0.01 # 1% for very small accounts
+
+        # 2. Score-Based Risk Scaling (Confluence Boost)
+        # Score 3: 100% of base risk
+        # Score 4: 110%
+        # Score 5: 120%
+        # Score 6+: 130%
+        confluence_mult = 1.0 + (max(0, score - 3) * 0.1)
+
+        # 3. Symbol-Based Weight (from PairRanker)
+        final_risk_percent = risk_percent * confluence_mult * symbol_weight
         
-        risk_amount = balance * risk_percent
+        risk_amount = balance * final_risk_percent
         
         # 2. Risk per Unit
         risk_per_unit = entry_price - stop_loss

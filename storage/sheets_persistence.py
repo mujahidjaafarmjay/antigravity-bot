@@ -225,8 +225,10 @@ class SheetsPersistence:
         final_summary = {}
         for score, s in summary.items():
             win_rate = s["wins"] / s["trades"] if s["trades"] > 0 else 0
-            avg_win = sum(s["win_amounts"]) / len(s["win_amounts"]) if s["win_amounts"] else 0
-            avg_loss = sum(s["loss_amounts"]) / len(s["loss_amounts"]) if s["loss_amounts"] else 0
+
+            # Correct Avg Win/Loss: only use data from corresponding outcomes
+            avg_win = sum(s["win_amounts"]) / len(s["win_amounts"]) if s["win_amounts"] else 0.0
+            avg_loss = sum(s["loss_amounts"]) / len(s["loss_amounts"]) if s["loss_amounts"] else 0.0
 
             # Expectancy = (WinRate * AvgWin) - (LossRate * AvgLoss)
             expectancy = (win_rate * avg_win) - ((1 - win_rate) * avg_loss)

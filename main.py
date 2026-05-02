@@ -6,6 +6,7 @@ from exchange.bybit_handler import BybitHandler
 from logic.brain import Brain
 from logic.risk_manager import RiskManager
 from logic.optimizer import StrategyOptimizer
+from logic.pair_ranker import PairRanker
 from storage.sheets_persistence import SheetsPersistence
 from notifications.telegram_sender import TelegramSender
 from notifications.command_handler import TelegramCommandHandler
@@ -37,7 +38,8 @@ class TradingBot:
         self.bybit = BybitHandler()
         self.brain = Brain()
         self.risk = RiskManager()
-        self.optimizer = StrategyOptimizer(min_trades_required=15)
+        self.optimizer = StrategyOptimizer(min_trades_required=20)
+        self.ranker = PairRanker(min_trades_required=5)
         self.sheets = SheetsPersistence()
         self.telegram = TelegramSender()
         self.cmd_handler = TelegramCommandHandler(self.telegram, self.bybit, self.sheets, self.risk)
@@ -49,6 +51,7 @@ class TradingBot:
         self.reported_signals = {} # Track last score sent to Telegram
         self.execution_lock = {} # Prevent duplicate execution attempts
         self.active_trades = {} # Track open trades for P&L logging
+        self.closed_trades_count = 0 # Counter to avoid aggressive optimization
         self.instance_id = datetime.now().strftime("%H%M%S") # Unique ID for this run
         
         self._recover_state()
@@ -71,8 +74,10 @@ class TradingBot:
         logger.info(f"State recovered. Daily PnL: ${self.daily_pnl:.2f}, Halted: {self.is_halted}, Balance: ${self.starting_balance:.2f}, Active Trades: {len(self.active_trades)}")
 
     def _run_optimization(self):
-        """Fetches data and runs strategy optimizer."""
-        logger.info("Running Strategy Optimizer...")
+        """Fetches data and runs strategy optimizer and pair ranker."""
+        logger.info("Running Tier 2 Strategy Optimization...")
+
+        # 1. Score-Level Optimization
         summary = self.sheets.get_performance_summary()
         disabled = self.optimizer.analyze_and_optimize(summary)
 
@@ -82,6 +87,10 @@ class TradingBot:
 
         # Pass disabled scores to brain
         self.brain.set_disabled_scores(disabled)
+
+        # 2. Symbol-Level Ranking
+        raw_perf = self.sheets.get_all_performance_data()
+        self.ranker.update_rankings(raw_perf)
 
     def _monitor_active_trades(self):
         """Checks if active trades hit TP or SL."""
@@ -142,8 +151,11 @@ class TradingBot:
                     # Remove from local memory
                     del self.active_trades[symbol]
 
-                    # Trigger Optimization check after a trade close
-                    self._run_optimization()
+                    # Trigger Optimization periodically (every 10 trades)
+                    self.closed_trades_count += 1
+                    if self.closed_trades_count >= 10:
+                        self._run_optimization()
+                        self.closed_trades_count = 0
 
             except Exception as e:
                 logger.error(f"Error monitoring {symbol}: {e}")
@@ -238,8 +250,20 @@ class TradingBot:
                             # We use 'ask' for Buying to ensure immediate placement
                             exec_price = ask
                             
-                            # 4. Calculate Qty
-                            qty, qty_reason = self.risk.calculate_position(balance, exec_price, decision['stop_loss'])
+                            # 4. Check Pair Ranker hard filter
+                            if self.ranker.should_skip_symbol(symbol):
+                                logger.warning(f"PairRanker: Skipping {symbol} due to toxic performance history.")
+                                continue
+
+                            # 5. Calculate Qty with Risk Scaling
+                            symbol_weight = self.ranker.get_symbol_weight(symbol)
+                            qty, qty_reason = self.risk.calculate_position(
+                                balance,
+                                exec_price,
+                                decision['stop_loss'],
+                                score=decision['score'],
+                                symbol_weight=symbol_weight
+                            )
                             if qty > 0:
                                 # 5. Lock execution BEFORE attempt to prevent race conditions
                                 self.execution_lock[symbol] = datetime.now() + timedelta(minutes=15)
