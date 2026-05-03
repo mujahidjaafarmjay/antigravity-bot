@@ -26,6 +26,7 @@ class Brain:
         """
         Determines the Global Market Trend using BTC as the driver.
         Returns 'bullish' or 'bearish'.
+        Tier 7: Added RSI momentum filter to reduce sideways traps.
         """
         if btc_df is None or len(btc_df) < config.MA_SLOW:
             return "unknown"
@@ -33,10 +34,21 @@ class Brain:
         btc_df['ma50'] = btc_df['close'].rolling(window=config.MA_FAST).mean()
         btc_df['ma200'] = btc_df['close'].rolling(window=config.MA_SLOW).mean()
 
+        # Calculate RSI (14)
+        delta = btc_df['close'].diff()
+        gain = (delta.where(delta > 0, 0)).rolling(window=14).mean()
+        loss = (-delta.where(delta < 0, 0)).rolling(window=14).mean()
+        rs = gain / loss
+        btc_df['rsi'] = 100 - (100 / (1 + rs))
+
         current_ma50 = btc_df['ma50'].iloc[-2]
         current_ma200 = btc_df['ma200'].iloc[-2]
+        current_rsi = btc_df['rsi'].iloc[-2]
 
-        return "bullish" if current_ma50 > current_ma200 else "bearish"
+        # Bullish only if MA50 > MA200 AND RSI > 50 (Positive Momentum)
+        if current_ma50 > current_ma200 and current_rsi > 50:
+            return "bullish"
+        return "bearish"
 
     def _is_session_active(self):
         """

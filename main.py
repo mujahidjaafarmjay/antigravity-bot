@@ -52,6 +52,7 @@ class TradingBot:
         self.starting_balance = 0.0
         self.reported_signals = {} # Track last score sent to Telegram
         self.execution_lock = {} # Prevent duplicate execution attempts
+        self.daily_trade_count = 0 # Tier 7 Frequency Control
         self.active_trades = {} # Track open trades for P&L logging
         self.closed_trades_count = 0 # Counter to avoid aggressive optimization
         self.instance_id = datetime.now().strftime("%H%M%S") # Unique ID for this run
@@ -68,8 +69,9 @@ class TradingBot:
         today_str = datetime.now().strftime("%Y-%m-%d")
 
         if last_run_str != today_str:
-            logger.info(f"New day detected ({today_str}). Resetting daily PnL.")
+            logger.info(f"New day detected ({today_str}). Resetting daily PnL and trade count.")
             self.daily_pnl = 0.0
+            self.daily_trade_count = 0
             self.is_halted = False
             self.sheets.set_bot_meta("last_reset_date", today_str)
             self.sheets.update_meta(0.0, False)
@@ -251,6 +253,12 @@ class TradingBot:
                     self.telegram.alert_critical(f"Daily loss limit reached (${self.daily_pnl:.2f}). Trading halted.")
                     continue
 
+                # Tier 7: Daily Trade Frequency Control
+                if self.daily_trade_count >= self.risk.max_trades_per_day:
+                    logger.warning(f"Daily trade limit reached ({self.risk.max_trades_per_day}). Scanning paused.")
+                    time.sleep(3600)
+                    continue
+
                 # 2. Monitor Active Trades (TP/SL)
                 self._monitor_active_trades()
 
@@ -398,6 +406,7 @@ class TradingBot:
                                 
                                 if result["success"]:
                                     # ✅ SUCCESS
+                                    self.daily_trade_count += 1
                                     order_id = result['order_id']
                                     logger.info(f"✅ SUCCESS: Trade executed for {symbol} | ID: {order_id}")
                                     self.telegram.send_message(

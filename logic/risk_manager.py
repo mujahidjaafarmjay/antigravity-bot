@@ -12,6 +12,8 @@ class RiskManager:
         self.daily_loss_limit = config.DAILY_LOSS_LIMIT_PERCENT
         self.consecutive_losses = 0
         self.kill_switch_time = None
+        self.peak_balance = 0.0
+        self.max_trades_per_day = 5
 
     def get_score_weight(self, score, performance_summary=None):
         """
@@ -48,6 +50,13 @@ class RiskManager:
         if balance <= 0:
             return 0, "Invalid Balance"
 
+        # 0. Tier 7: Equity Curve Control (Drawdown Protection)
+        if balance > self.peak_balance:
+            self.peak_balance = balance
+
+        drawdown = (self.peak_balance - balance) / self.peak_balance if self.peak_balance > 0 else 0
+        drawdown_mult = 0.5 if drawdown >= 0.05 else 1.0 # Reduce risk by 50% if > 5% drawdown
+
         # 1. Base Risk per Trade
         risk_percent = 0.03 # Calibration baseline 3%
         if balance < 30:
@@ -56,8 +65,8 @@ class RiskManager:
         # 2. Score-Based Risk Weighting
         score_mult = self.get_score_weight(score, performance_summary)
 
-        # 3. Symbol-Based Weight (from PairRanker)
-        final_risk_percent = risk_percent * score_mult * symbol_weight
+        # 3. Symbol-Based Weight (from PairRanker) + Drawdown Mult
+        final_risk_percent = risk_percent * score_mult * symbol_weight * drawdown_mult
 
         risk_amount = balance * final_risk_percent
         
