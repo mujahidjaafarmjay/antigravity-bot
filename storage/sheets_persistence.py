@@ -230,30 +230,21 @@ class SheetsPersistence:
             now = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
             rows = []
 
-            # 1. Global Stats
-            g = summary.get("GLOBAL", {})
-            rows.append([
-                "GLOBAL", "ALL", g.get("trades", 0),
-                f"{g.get('wins', 0)/g.get('trades', 1):.1%}" if g.get('trades', 0) > 0 else "0%",
-                g.get("net_pnl", 0.0), 0, # Expectancy not defined for global here
-                f"{g.get('gross_win_pnl', 0) / g.get('gross_loss_pnl', 1):.2f}" if g.get('gross_loss_pnl', 0) > 0 else "1.0",
-                0, 0, now
-            ])
-
-            # 2. Score Stats
-            for key in sorted(summary.keys()):
-                if key == "GLOBAL": continue
+            # Global and Score Analytics (Tier 8 Upgrade)
+            for key in sorted(summary.keys(), key=lambda x: str(x)):
                 s = summary[key]
+                metric_type = "GLOBAL" if key == "GLOBAL" else "SCORE"
+
                 rows.append([
-                    "SCORE", key, s["trades"], f"{s['win_rate']:.1%}",
-                    s["net_pnl"], s["expectancy"], s["profit_factor"],
-                    s["avg_win"], s["avg_loss"], now
+                    metric_type, key, s["trades"], f"{s['win_rate']:.1%}",
+                    f"${s['net_pnl']:.2f}", f"{s['expectancy']:.4f}", f"{s['profit_factor']:.2f}",
+                    f"{s.get('real_edge', 0):.4f}", f"{s.get('avg_slippage', 0):.4f}", now
                 ])
 
             # Clear and Update
             self.stats_tab.clear()
             self.stats_tab.append_row([
-                "Metric_Type", "Key", "Trades", "WinRate", "NetPnL", "Expectancy", "ProfitFactor", "AvgWin", "AvgLoss", "LastUpdate"
+                    "Metric_Type", "Key", "Trades", "WinRate", "NetPnL", "Expectancy", "ProfitFactor", "RealEdge", "AvgSlip", "LastUpdate"
             ])
             self.stats_tab.append_rows(rows)
         except Exception as e:
@@ -295,17 +286,22 @@ class SheetsPersistence:
                 pnl = float(row.get('PnL', row.get('net_pnl', 0)))
                 fees = float(row.get('Fees', row.get('fees', 0)))
                 outcome = row.get('Outcome', row.get('outcome', ''))
+                slippage = float(row.get('Slippage', 0))
 
                 # Update Score Stats
                 s = summary[score]
                 s["trades"] += 1
                 s["total_fees"] += fees
+                if "slippages" not in s: s["slippages"] = []
+                s["slippages"].append(slippage)
 
                 # Update Global Stats
                 g = summary["GLOBAL"]
                 g["trades"] += 1
                 g["total_fees"] += fees
                 g["net_pnl"] += pnl
+                if "slippages" not in g: g["slippages"] = []
+                g["slippages"].append(slippage)
 
                 if outcome.upper() == "WIN":
                     s["wins"] += 1
@@ -328,28 +324,25 @@ class SheetsPersistence:
         # Finalize calculations
         final_summary = {}
         for key, s in summary.items():
-            if key == "GLOBAL":
-                final_summary["GLOBAL"] = s
-                continue
-
             win_rate = s["wins"] / s["trades"] if s["trades"] > 0 else 0
-
-            # Correct Avg Win/Loss: only use data from corresponding outcomes
             avg_win = s["gross_win_pnl"] / s["wins"] if s["wins"] > 0 else 0.0
             avg_loss = s["gross_loss_pnl"] / s["losses"] if s["losses"] > 0 else 0.0
-
-            # Expectancy = (WinRate * AvgWin) - (LossRate * AvgLoss)
             expectancy = (win_rate * avg_win) - ((1 - win_rate) * avg_loss)
-
-            # Profit Factor = Gross Wins / Gross Losses
             profit_factor = s["gross_win_pnl"] / s["gross_loss_pnl"] if s["gross_loss_pnl"] > 0 else (float('inf') if s["gross_win_pnl"] > 0 else 1.0)
+
+            avg_slippage = sum(s.get("slippages", [])) / s["trades"] if s["trades"] > 0 else 0
+            net_pnl = s["gross_win_pnl"] - s["gross_loss_pnl"] - s["total_fees"]
+            avg_cost = (s["total_fees"] / s["trades"]) + avg_slippage if s["trades"] > 0 else 0
+            real_edge = expectancy - avg_cost
 
             final_summary[key] = {
                 "score": key,
                 "trades": s["trades"],
                 "win_rate": win_rate,
-                "net_pnl": s["gross_win_pnl"] - s["gross_loss_pnl"] - s["total_fees"],
+                "net_pnl": net_pnl,
                 "expectancy": expectancy,
+                "real_edge": real_edge,
+                "avg_slippage": avg_slippage,
                 "profit_factor": profit_factor,
                 "avg_win": avg_win,
                 "avg_loss": avg_loss,

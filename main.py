@@ -166,14 +166,19 @@ class TradingBot:
                     outcome = "LOSS"
                     exit_price = trade['stop_loss']
                 else:
-                    # Tier 8: Dead Trade Detection (4-hour time-based exit)
+                    # Tier 8: Dead Trade Detection (Adaptive time-based exit)
                     if 'timestamp' in trade:
                         try:
                             start_time = datetime.strptime(trade['timestamp'], "%Y-%m-%d %H:%M:%S").replace(tzinfo=self.utc)
                             duration_mins = int((datetime.now(self.utc) - start_time).total_seconds() / 60)
-                            if duration_mins >= 240: # 4 hours
+
+                            # Adaptive Timeout: Shorter in low volatility (3h), longer in high volatility (6h)
+                            atr_perc = trade.get('atr_perc', 1.0)
+                            timeout_mins = 360 if atr_perc > 2.0 else 180 # 6h if volatile, 3h if stagnant
+
+                            if duration_mins >= timeout_mins:
                                 outcome = "TIME_EXIT"
-                                logger.info(f"⌛ DEAD TRADE DETECTION: Closing {symbol} after 4 hours.")
+                                logger.info(f"⌛ DEAD TRADE DETECTION: Closing {symbol} after {timeout_mins} mins.")
                         except: pass
 
                 if outcome:
@@ -189,7 +194,7 @@ class TradingBot:
 
                     # Update Daily PnL
                     self.daily_pnl += net_pnl
-                    self.sheets.update_meta(self.daily_pnl, self.is_halted) # Persist immediately
+                    self.sheets.update_meta(self.daily_pnl, self.is_halted, self.risk.peak_balance) # Persist immediately
 
                     # Track Loss Streak for Kill Switch
                     self.risk.update_loss_streak(outcome)
@@ -256,6 +261,7 @@ class TradingBot:
                     continue
 
                 balance = self.bybit.get_balance()
+                self.risk.update_peak_balance(balance)
                 if balance <= 0:
                     logger.error("Balance unreadable or 0. Skipping iteration.")
                     time.sleep(config.BALANCE_CACHE_SECONDS)
@@ -264,7 +270,7 @@ class TradingBot:
                 # Check Daily Loss (Hard USDT limit or Percentage)
                 if self.risk.check_daily_loss(self.daily_pnl, self.starting_balance):
                     self.is_halted = True
-                    self.sheets.update_meta(self.daily_pnl, self.is_halted)
+                    self.sheets.update_meta(self.daily_pnl, self.is_halted, self.risk.peak_balance)
                     self.telegram.alert_critical(f"Daily loss limit reached (${self.daily_pnl:.2f}). Trading halted.")
                     continue
 
@@ -318,7 +324,15 @@ class TradingBot:
                         continue
 
                     # Evaluate Trade
-                    decision = self.brain.evaluate_trade(symbol, df, balance)
+                    # Recovery Mode: Increase threshold to Score 5+
+                    if getattr(self.risk, 'in_recovery_mode', False) and not config.CALIBRATION_MODE:
+                        orig_threshold = self.brain.disabled_scores.copy()
+                        # Temporarily disable lower scores (3, 4) in recovery mode
+                        self.brain.disabled_scores.update({3, 4})
+                        decision = self.brain.evaluate_trade(symbol, df, balance)
+                        self.brain.disabled_scores = orig_threshold # Reset
+                    else:
+                        decision = self.brain.evaluate_trade(symbol, df, balance)
 
                     # Tier 4 Volatility Guard
                     if self.risk.is_volatility_too_high(df):
@@ -488,7 +502,7 @@ class TradingBot:
                     time.sleep(config.API_DELAY) # Avoid rate limits
 
                 # Update Meta periodically
-                self.sheets.update_meta(self.daily_pnl, self.is_halted)
+                self.sheets.update_meta(self.daily_pnl, self.is_halted, self.risk.peak_balance)
                 
                 # Sleep before next scan (Check for manual scan request every second)
                 logger.info("Scan complete. Sleeping...")

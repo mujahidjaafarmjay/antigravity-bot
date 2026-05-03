@@ -26,13 +26,18 @@ class RiskManager:
             if stats['trades'] >= 10: # Lowered threshold for Tier 5 adaptation
                 exp = stats['expectancy']
                 pf = stats.get('profit_factor', 1.0)
+                avg_slippage = stats.get('avg_slippage', 0.0)
 
                 # Adaptive multiplier based on expectancy (Edge)
                 # Hard Tier 6 Check: Profit Factor must be >= 1.1 to be considered stable
                 if exp <= 0 or pf < 1.1: return 0.0 # Disable risk for losing/unstable signals
 
-                # Weight = 1.0 + Expectancy (capped at 1.2x for safety on small account)
-                return min(1.2, 1.0 + exp)
+                # Tier 8: Slippage-aware risk scaling
+                slip_mult = 1.0
+                if avg_slippage > 0.002: slip_mult = 0.7 # Reduce risk for high-slippage environments
+
+                # Weight = 1.0 + Expectancy (capped at 1.1x for extreme safety on $40 account)
+                return min(1.1, (1.0 + exp) * slip_mult)
 
         # 2. Fallback to Static Strategic Weights
         weights = {
@@ -43,6 +48,15 @@ class RiskManager:
         }
         return weights.get(score, 1.0)
 
+    def update_peak_balance(self, balance):
+        """Updates peak balance and checks for recovery mode."""
+        if balance > self.peak_balance:
+            self.peak_balance = balance
+
+        drawdown = (self.peak_balance - balance) / self.peak_balance if self.peak_balance > 0 else 0
+        self.in_recovery_mode = drawdown >= 0.05
+        return drawdown
+
     def calculate_position(self, balance, entry_price, stop_loss, score=3, symbol_weight=1.0, performance_summary=None, spread=0, session="ASIAN"):
         """
         Calculates the quantity based on dynamic risk rules, score weight, and symbol rank.
@@ -52,11 +66,8 @@ class RiskManager:
             return 0, "Invalid Balance"
 
         # 0. Tier 7: Equity Curve Control (Drawdown Protection)
-        if balance > self.peak_balance:
-            self.peak_balance = balance
-
-        drawdown = (self.peak_balance - balance) / self.peak_balance if self.peak_balance > 0 else 0
-        drawdown_mult = 0.5 if drawdown >= 0.05 else 1.0 # Reduce risk by 50% if > 5% drawdown
+        drawdown = self.update_peak_balance(balance)
+        drawdown_mult = 0.5 if self.in_recovery_mode else 1.0 # Reduce risk by 50% if > 5% drawdown
 
         # 1. Base Risk per Trade
         risk_percent = 0.03 # Calibration baseline 3%
