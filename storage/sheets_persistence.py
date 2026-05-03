@@ -212,15 +212,24 @@ class SheetsPersistence:
             return []
 
     def get_performance_summary(self):
-        """Calculates performance metrics grouped by score with high-fidelity accumulation."""
+        """Calculates performance metrics grouped by score and global stats."""
         data = self.get_all_performance_data()
-        if not data:
-            return {}
 
-        summary = {} # {score: {metrics}}
+        # Initialize summary with global stats container
+        summary = {
+            "GLOBAL": {
+                "trades": 0, "wins": 0, "losses": 0,
+                "gross_win_pnl": 0.0, "gross_loss_pnl": 0.0,
+                "total_fees": 0.0, "net_pnl": 0.0
+            }
+        }
+
+        if not data:
+            return summary
 
         for row in data:
             try:
+                # Use standardized lowercase keys if possible, but handle sheet headers
                 score = row.get('Score')
                 if score is None or score == "": continue
                 score = int(score)
@@ -233,29 +242,47 @@ class SheetsPersistence:
                         "win_amounts": [], "loss_amounts": []
                     }
 
+                # Standardize pnl field (handle 'PnL' from sheet or 'net_pnl' from code)
+                pnl = float(row.get('PnL', row.get('net_pnl', 0)))
+                fees = float(row.get('Fees', row.get('fees', 0)))
+                outcome = row.get('Outcome', row.get('outcome', ''))
+
+                # Update Score Stats
                 s = summary[score]
                 s["trades"] += 1
-                pnl = float(row.get('PnL', 0))
-                fees = float(row.get('Fees', 0))
-                outcome = row.get('Outcome')
-
                 s["total_fees"] += fees
 
-                if outcome == "WIN":
+                # Update Global Stats
+                g = summary["GLOBAL"]
+                g["trades"] += 1
+                g["total_fees"] += fees
+                g["net_pnl"] += pnl
+
+                if outcome.upper() == "WIN":
                     s["wins"] += 1
                     s["gross_win_pnl"] += pnl
                     s["win_amounts"].append(pnl)
-                elif outcome == "LOSS":
+
+                    g["wins"] += 1
+                    g["gross_win_pnl"] += pnl
+                elif outcome.upper() == "LOSS":
                     s["losses"] += 1
                     s["gross_loss_pnl"] += abs(pnl)
                     s["loss_amounts"].append(abs(pnl))
+
+                    g["losses"] += 1
+                    g["gross_loss_pnl"] += abs(pnl)
             except Exception as e:
                 self.logger.error(f"Error processing row for performance summary: {e}")
                 continue
 
         # Finalize calculations
         final_summary = {}
-        for score, s in summary.items():
+        for key, s in summary.items():
+            if key == "GLOBAL":
+                final_summary["GLOBAL"] = s
+                continue
+
             win_rate = s["wins"] / s["trades"] if s["trades"] > 0 else 0
 
             # Correct Avg Win/Loss: only use data from corresponding outcomes
@@ -268,8 +295,8 @@ class SheetsPersistence:
             # Profit Factor = Gross Wins / Gross Losses
             profit_factor = s["gross_win_pnl"] / s["gross_loss_pnl"] if s["gross_loss_pnl"] > 0 else (float('inf') if s["gross_win_pnl"] > 0 else 1.0)
 
-            final_summary[score] = {
-                "score": score,
+            final_summary[key] = {
+                "score": key,
                 "trades": s["trades"],
                 "win_rate": win_rate,
                 "net_pnl": s["gross_win_pnl"] - s["gross_loss_pnl"] - s["total_fees"],

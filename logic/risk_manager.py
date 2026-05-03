@@ -13,8 +13,22 @@ class RiskManager:
         self.consecutive_losses = 0
         self.kill_switch_time = None
 
-    def get_score_weight(self, score):
-        """Dynamic weight based on signal score."""
+    def get_score_weight(self, score, performance_summary=None):
+        """
+        Dynamic weight based on signal score.
+        If sufficient data exists, weights become data-driven.
+        """
+        # 1. Check if we have data-driven weights (Institutional tier)
+        if performance_summary and score in performance_summary:
+            stats = performance_summary[score]
+            if stats['trades'] >= 20:
+                exp = stats['expectancy']
+                if exp <= 0: return 0.5
+                if exp < 0.5: return 0.8
+                if exp < 1.0: return 1.0
+                return 1.2
+
+        # 2. Fallback to Static Strategic Weights
         weights = {
             3: 0.5,
             4: 1.0,
@@ -23,7 +37,7 @@ class RiskManager:
         }
         return weights.get(score, 1.0)
 
-    def calculate_position(self, balance, entry_price, stop_loss, score=3, symbol_weight=1.0):
+    def calculate_position(self, balance, entry_price, stop_loss, score=3, symbol_weight=1.0, performance_summary=None):
         """
         Calculates the quantity based on dynamic risk rules, score weight, and symbol rank.
         """
@@ -36,11 +50,11 @@ class RiskManager:
             risk_percent = 0.015 # 1.5% for small balance
 
         # 2. Score-Based Risk Weighting
-        score_mult = self.get_score_weight(score)
+        score_mult = self.get_score_weight(score, performance_summary)
 
         # 3. Symbol-Based Weight (from PairRanker)
         final_risk_percent = risk_percent * score_mult * symbol_weight
-        
+
         risk_amount = balance * final_risk_percent
         
         # 2. Risk per Unit
@@ -159,16 +173,17 @@ class RiskManager:
     def is_equity_under_pressure(self, performance_summary):
         """
         Equity Curve Protection:
-        Detects if recent performance is below threshold using safe key access.
+        Uses the 'GLOBAL' container for absolute consistency.
         """
-        if not performance_summary:
+        if not performance_summary or "GLOBAL" not in performance_summary:
             return False
 
-        all_wins = sum(s.get('gross_win_pnl', 0) for s in performance_summary.values())
-        all_losses = sum(s.get('gross_loss_pnl', 0) for s in performance_summary.values())
+        g = performance_summary["GLOBAL"]
+        if g['trades'] < config.EQUITY_PROTECT_TRADES:
+            return False
 
-        if all_losses > 0:
-            pf = all_wins / all_losses
+        if g['gross_loss_pnl'] > 0:
+            pf = g['gross_win_pnl'] / g['gross_loss_pnl']
             if pf < config.EQUITY_PROTECT_THRESHOLD:
                 return True
         return False
@@ -176,19 +191,19 @@ class RiskManager:
     def is_market_toxic(self, performance_summary):
         """
         Bad Market Filter:
-        Detects if total expectancy of the bot across all signals is deeply negative.
+        Detects if recent global Profit Factor is below critical threshold.
         """
-        if not performance_summary:
+        if not performance_summary or "GLOBAL" not in performance_summary:
             return False
 
-        total_trades = sum(s['trades'] for s in performance_summary.values())
-        if total_trades < 10:
+        g = performance_summary["GLOBAL"]
+        if g['trades'] < 10:
             return False
 
-        total_exp = sum(s['expectancy'] for s in performance_summary.values()) / len(performance_summary)
-
-        if total_exp < -2.0: # Deeply losing baseline
-            return True
+        if g['gross_loss_pnl'] > 0:
+            pf = g['gross_win_pnl'] / g['gross_loss_pnl']
+            if pf < 0.8: # Market is toxic if we're losing > 20% more than we win
+                return True
         return False
 
     def check_daily_loss(self, current_pnl, starting_balance):

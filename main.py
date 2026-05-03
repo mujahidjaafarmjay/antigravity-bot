@@ -329,14 +329,15 @@ class TradingBot:
 
                             # 6. Calculate Qty with Risk Scaling (Respects CALIBRATION_MODE)
                             symbol_weight = 1.0 if config.CALIBRATION_MODE else self.ranker.get_symbol_weight(symbol)
-                            score_scaling = decision['score'] # Use real score for weighting
 
+                            # Use performance data for risk weighting if available
                             qty, qty_reason = self.risk.calculate_position(
                                 balance,
                                 exec_price,
                                 decision['stop_loss'],
-                                score=score_scaling,
-                                symbol_weight=symbol_weight
+                                score=decision['score'],
+                                symbol_weight=symbol_weight,
+                                performance_summary=perf_summary
                             )
                             risk_usdt = qty * abs(exec_price - decision['stop_loss'])
                             if qty > 0:

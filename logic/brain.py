@@ -109,11 +109,15 @@ class Brain:
             return self._hold(symbol, f"Trend Fail: MA50 ({current_ma50:.2f}) <= MA200 ({current_ma200:.2f})")
 
         action = "HOLD"
+        # Determine action threshold (Strict threshold vs Calibration MIN_SCORE)
+        # Note: Brain always assigns action labels, main.py decides whether to execute.
+        threshold = config.MIN_SCORE_TO_TRADE if config.CALIBRATION_MODE else config.SCORE_THRESHOLD
+
         if score in self.disabled_scores:
             action = "HOLD (DISABLED BY OPTIMIZER)"
-        elif score >= config.SCORE_THRESHOLD + 1:
+        elif score >= threshold + 1:
             action = "STRONG BUY"
-        elif score >= config.SCORE_THRESHOLD:
+        elif score >= threshold:
             action = "BUY"
         elif score >= 2:
             action = "WATCH"
