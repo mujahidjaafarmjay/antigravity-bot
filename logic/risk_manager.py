@@ -15,18 +15,19 @@ class RiskManager:
 
     def get_score_weight(self, score, performance_summary=None):
         """
-        Dynamic weight based on signal score.
-        If sufficient data exists, weights become data-driven.
+        Tier 5: Dynamic Weighting based on Expectancy.
+        Scales risk based on proven statistical edge.
         """
         # 1. Check if we have data-driven weights (Institutional tier)
         if performance_summary and score in performance_summary:
             stats = performance_summary[score]
-            if stats['trades'] >= 20:
+            if stats['trades'] >= 10: # Lowered threshold for Tier 5 adaptation
                 exp = stats['expectancy']
-                if exp <= 0: return 0.5
-                if exp < 0.5: return 0.8
-                if exp < 1.0: return 1.0
-                return 1.2
+                # Adaptive multiplier based on expectancy (Edge)
+                if exp <= 0: return 0.0 # Disable risk for losing signals
+
+                # Weight = 1.0 + Expectancy (capped at 1.5x)
+                return min(1.5, 1.0 + exp)
 
         # 2. Fallback to Static Strategic Weights
         weights = {

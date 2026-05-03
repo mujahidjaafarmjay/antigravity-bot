@@ -39,8 +39,8 @@ class TradingBot:
         self.bybit = BybitHandler()
         self.brain = Brain()
         self.risk = RiskManager()
-        self.optimizer = StrategyOptimizer(min_trades_required=30)
-        self.ranker = PairRanker(min_trades_required=10)
+        self.optimizer = StrategyOptimizer(min_trades_required=10) # Tier 5: Faster adaptation
+        self.ranker = PairRanker(min_trades_required=5)
         self.sheets = SheetsPersistence()
         self.telegram = TelegramSender()
         self.cmd_handler = TelegramCommandHandler(self.telegram, self.bybit, self.sheets, self.risk)
@@ -62,9 +62,21 @@ class TradingBot:
         """Recovers state and reconciles Sheets with Exchange reality."""
         logger.info("Recovering state from Google Sheets...")
         meta = self.sheets.get_meta()
-        self.daily_pnl = meta.get('daily_net_pnl', 0.0)
-        self.is_halted = meta.get('is_halted', False)
-        
+
+        # Daily PnL Reset Logic
+        last_run_str = self.sheets.get_bot_meta("last_reset_date")
+        today_str = datetime.now().strftime("%Y-%m-%d")
+
+        if last_run_str != today_str:
+            logger.info(f"New day detected ({today_str}). Resetting daily PnL.")
+            self.daily_pnl = 0.0
+            self.is_halted = False
+            self.sheets.set_bot_meta("last_reset_date", today_str)
+            self.sheets.update_meta(0.0, False)
+        else:
+            self.daily_pnl = meta.get('daily_net_pnl', 0.0)
+            self.is_halted = meta.get('is_halted', False)
+
         # 1. Fetch truth from exchange
         open_orders = self.bybit.get_open_orders()
         exchange_symbols = [o['symbol'] for o in open_orders]
@@ -108,6 +120,9 @@ class TradingBot:
             return
 
         logger.info("Running Tier 2 Strategy Optimization...")
+
+        # Update Stats Tab in Sheets for visibility
+        self.sheets.update_stats_tab(summary)
 
         # 1. Score-Level Optimization
         disabled = self.optimizer.analyze_and_optimize(summary)
@@ -238,10 +253,11 @@ class TradingBot:
                 # 3. Global Market Trend Filter
                 btc_df, _, _ = self.bybit.get_market_data("BTCUSDT")
                 market_trend = self.brain.get_market_trend(btc_df)
+                self.brain.current_market_trend = market_trend # Pass to brain for soft filter
 
-                if market_trend != "bullish":
-                    logger.warning(f"Market Trend is {market_trend.upper()}. Skipping trade scanning to preserve capital.")
-                    time.sleep(300) # Sleep for 5 mins
+                if market_trend == "unknown":
+                    logger.warning("Market Trend UNKNOWN. Skipping trade scanning.")
+                    time.sleep(300)
                     continue
 
                 # 4. Iterate through Halal Pairs

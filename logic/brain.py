@@ -125,9 +125,17 @@ class Brain:
             return self._hold(symbol, f"Trend Fail: MA50 ({current_ma50:.2f}) <= MA200 ({current_ma200:.2f})")
 
         action = "HOLD"
-        # Determine action threshold (Strict threshold vs Calibration MIN_SCORE)
-        # Note: Brain always assigns action labels, main.py decides whether to execute.
-        threshold = config.MIN_SCORE_TO_TRADE if config.CALIBRATION_MODE else config.SCORE_THRESHOLD
+        # Determine action threshold (Soft Regime Filter)
+        # Bullish BTC: Trade Score 3+ | Bearish BTC: Only Trade Score 5+
+        # We'll need the global market trend passed in or calculated here
+        market_trend = getattr(self, 'current_market_trend', "bullish")
+
+        # During Calibration, we log Score 3 regardless of trend
+        if config.CALIBRATION_MODE:
+            threshold = config.MIN_SCORE_TO_TRADE
+        else:
+            # Tier 5 Regime Filter: Protect capital during bearish/unknown markets
+            threshold = config.SCORE_THRESHOLD if market_trend == "bullish" else 5
 
         if score in self.disabled_scores:
             action = "HOLD (DISABLED BY OPTIMIZER)"
