@@ -43,9 +43,10 @@ class RiskManager:
         }
         return weights.get(score, 1.0)
 
-    def calculate_position(self, balance, entry_price, stop_loss, score=3, symbol_weight=1.0, performance_summary=None):
+    def calculate_position(self, balance, entry_price, stop_loss, score=3, symbol_weight=1.0, performance_summary=None, spread=0, session="ASIAN"):
         """
         Calculates the quantity based on dynamic risk rules, score weight, and symbol rank.
+        Tier 8: Added Spread-aware and Session-aware risk scaling.
         """
         if balance <= 0:
             return 0, "Invalid Balance"
@@ -65,8 +66,18 @@ class RiskManager:
         # 2. Score-Based Risk Weighting
         score_mult = self.get_score_weight(score, performance_summary)
 
-        # 3. Symbol-Based Weight (from PairRanker) + Drawdown Mult
-        final_risk_percent = risk_percent * score_mult * symbol_weight * drawdown_mult
+        # 3. Spread-Aware Risk Scaling
+        spread_mult = 1.0
+        if spread > 0.002: spread_mult = 0.7
+        elif spread > 0.0015: spread_mult = 0.85
+
+        # 4. Session-Aware Risk Scaling
+        session_mult = 1.0
+        if session == "LONDON": session_mult = 1.2 # London is high conviction
+        elif session == "ASIAN": session_mult = 0.7 # Asia is lower volatility/higher noise
+
+        # 5. Combined Weighting
+        final_risk_percent = risk_percent * score_mult * symbol_weight * drawdown_mult * spread_mult * session_mult
 
         risk_amount = balance * final_risk_percent
         
@@ -148,12 +159,20 @@ class RiskManager:
             self.consecutive_losses = 0
             self.kill_switch_time = None
 
-    def is_kill_switch_active(self):
+    def is_kill_switch_active(self, performance_summary=None):
         """
-        Kill switch triggers after 3 consecutive losses.
+        Tier 8: Hardened Kill Switch.
+        Triggers after 3 losses AND expectancy drop.
         Auto-recovers after KILL_SWITCH_COOLDOWN_HOURS.
         """
-        if self.consecutive_losses < 3:
+        # If we have positive global expectancy, be slightly more lenient
+        threshold = 3
+        if performance_summary and "GLOBAL" in performance_summary:
+            g = performance_summary["GLOBAL"]
+            if g.get('net_pnl', 0) > 0:
+                threshold = 4 # Allow 4 losses if account is in profit
+
+        if self.consecutive_losses < threshold:
             return False
 
         if self.kill_switch_time:

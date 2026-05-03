@@ -155,12 +155,24 @@ class TradingBot:
                     continue
 
                 outcome = None
+                exit_price = current_price
+
                 if current_price >= trade['take_profit']:
                     outcome = "WIN"
                     exit_price = trade['take_profit']
                 elif current_price <= trade['stop_loss']:
                     outcome = "LOSS"
                     exit_price = trade['stop_loss']
+                else:
+                    # Tier 8: Dead Trade Detection (4-hour time-based exit)
+                    if 'timestamp' in trade:
+                        try:
+                            start_time = datetime.strptime(trade['timestamp'], "%Y-%m-%d %H:%M:%S").replace(tzinfo=self.utc)
+                            duration_mins = int((datetime.now(self.utc) - start_time).total_seconds() / 60)
+                            if duration_mins >= 240: # 4 hours
+                                outcome = "TIME_EXIT"
+                                logger.info(f"⌛ DEAD TRADE DETECTION: Closing {symbol} after 4 hours.")
+                        except: pass
 
                 if outcome:
                     # Calculate PnL (Simplified Spot calculation)
@@ -179,8 +191,8 @@ class TradingBot:
 
                     # Track Loss Streak for Kill Switch
                     self.risk.update_loss_streak(outcome)
-                    if self.risk.is_kill_switch_active():
-                        logger.critical("🚨 SMART KILL SWITCH TRIGGERED: 3 consecutive losses. Bot halting.")
+                    if self.risk.is_kill_switch_active(perf_summary):
+                        logger.critical(f"🚨 SMART KILL SWITCH TRIGGERED: {self.risk.consecutive_losses} consecutive losses. Bot halting.")
                         self.is_halted = True
                         self.telegram.alert_critical("Bot halted by Smart Kill Switch (3 consecutive losses).")
 
@@ -220,7 +232,7 @@ class TradingBot:
                 # 1. Safety Checks
                 if self.is_halted:
                     # Check if Kill Switch can auto-recover
-                    if not self.risk.is_kill_switch_active():
+                    if not self.risk.is_kill_switch_active(perf_summary):
                         logger.info("Bot auto-recovering from Smart Kill Switch...")
                         self.is_halted = False
                     else:
@@ -377,13 +389,16 @@ class TradingBot:
                             symbol_weight = 1.0 if config.CALIBRATION_MODE else self.ranker.get_symbol_weight(symbol)
 
                             # Use performance data for risk weighting if available
+                            spread_val = (ask - bid) / bid if bid > 0 else 0
                             qty, qty_reason = self.risk.calculate_position(
                                 balance,
                                 exec_price,
                                 decision['stop_loss'],
                                 score=decision['score'],
                                 symbol_weight=symbol_weight,
-                                performance_summary=perf_summary
+                                performance_summary=perf_summary,
+                                spread=spread_val,
+                                session=session
                             )
                             risk_usdt = qty * abs(exec_price - decision['stop_loss'])
                             if qty > 0:
