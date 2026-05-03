@@ -1,5 +1,6 @@
 import time
 import logging
+import pytz
 from datetime import datetime, timedelta
 import config
 from exchange.bybit_handler import BybitHandler

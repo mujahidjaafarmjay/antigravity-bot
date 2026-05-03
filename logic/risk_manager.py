@@ -105,8 +105,9 @@ class RiskManager:
             
         rr = reward / risk
         # Hard Tier 3 Filter: Min RR must be 2.0 or better
+        # Added a 0.01 epsilon to handle floating-point precision issues
         min_rr = max(2.0, config.REWARD_TO_RISK_RATIO)
-        if rr < min_rr:
+        if rr < (min_rr - 0.01):
             return False, f"RR too low ({rr:.2f} < {min_rr})"
 
         # 4. Spread Protection
