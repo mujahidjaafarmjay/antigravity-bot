@@ -62,7 +62,7 @@ class SheetsPersistence:
                 self.perf_tab = self.sheet.add_worksheet("Performance", rows=2000, cols=15)
                 self.perf_tab.append_row([
                     "Timestamp", "Symbol", "Score", "RR", "Risk_USDT", "Entry", "SL", "TP",
-                    "Outcome", "PnL", "Fees", "Duration_Mins", "Session", "ATR_Perc", "Mode"
+                "Outcome", "PnL", "Fees", "Duration_Mins", "Session", "ATR_Perc", "Slippage", "Mode"
                 ])
 
             # Active Trades Tab (for recovery)
@@ -93,6 +93,7 @@ class SheetsPersistence:
                     ["Key", "Value"],
                     ["daily_net_pnl", "0.0"],
                     ["is_halted", "False"],
+                    ["peak_balance", "0.0"],
                     ["last_run", ""]
                 ])
         except Exception as e:
@@ -117,7 +118,7 @@ class SheetsPersistence:
         except Exception as e:
             self.logger.error(f"Error logging trade to Sheets: {e}")
 
-    def log_outcome(self, trade, outcome, pnl, fees):
+    def log_outcome(self, trade, outcome, pnl, fees, slippage=0.0):
         """Logs a finished trade outcome with high-fidelity metrics."""
         if not self.perf_tab: return
         try:
@@ -145,6 +146,7 @@ class SheetsPersistence:
                 duration,
                 trade.get('session', ''),
                 trade.get('atr_perc', 0),
+                f"{slippage:.4f}",
                 config.MODE
             ])
             # Also remove from ActiveTrades
@@ -383,19 +385,21 @@ class SheetsPersistence:
         except Exception as e:
             self.logger.error(f"Error setting BotMeta key {key}: {e}")
 
-    def update_meta(self, daily_pnl, is_halted):
+    def update_meta(self, daily_pnl, is_halted, peak_balance=0.0):
         """Updates bot metadata."""
         if not self.meta_tab: return
         try:
             self.meta_tab.update("B2", str(daily_pnl))
             self.meta_tab.update("B3", str(is_halted))
-            self.meta_tab.update("B4", datetime.now().strftime("%Y-%m-%d %H:%M:%S"))
+            if peak_balance > 0:
+                self.meta_tab.update("B4", str(peak_balance))
+            self.meta_tab.update("B5", datetime.now().strftime("%Y-%m-%d %H:%M:%S"))
         except Exception as e:
             self.logger.error(f"Error updating BotMeta: {e}")
 
     def get_meta(self):
         """Retrieves bot metadata for startup recovery."""
-        if not self.meta_tab: return {"daily_net_pnl": 0.0, "is_halted": False}
+        if not self.meta_tab: return {"daily_net_pnl": 0.0, "is_halted": False, "peak_balance": 0.0}
         try:
             data = self.meta_tab.get_all_records()
             meta = {}
@@ -404,7 +408,8 @@ class SheetsPersistence:
             
             return {
                 "daily_net_pnl": float(meta.get('daily_net_pnl', 0.0)),
-                "is_halted": meta.get('is_halted', 'False').lower() == 'true'
+                "is_halted": meta.get('is_halted', 'False').lower() == 'true',
+                "peak_balance": float(meta.get('peak_balance', 0.0))
             }
         except Exception as e:
             self.logger.error(f"Error reading BotMeta: {e}")

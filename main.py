@@ -63,6 +63,7 @@ class TradingBot:
         """Recovers state and reconciles Sheets with Exchange reality."""
         logger.info("Recovering state from Google Sheets...")
         meta = self.sheets.get_meta()
+        self.risk.peak_balance = meta.get('peak_balance', 0.0)
 
         # Daily PnL Reset Logic
         last_run_str = self.sheets.get_bot_meta("last_reset_date")
@@ -73,8 +74,9 @@ class TradingBot:
             self.daily_pnl = 0.0
             self.daily_trade_count = 0
             self.is_halted = False
+            self.starting_balance = self.bybit.get_balance() # Refresh baseline
             self.sheets.set_bot_meta("last_reset_date", today_str)
-            self.sheets.update_meta(0.0, False)
+            self.sheets.update_meta(0.0, False, self.risk.peak_balance)
         else:
             self.daily_pnl = meta.get('daily_net_pnl', 0.0)
             self.is_halted = meta.get('is_halted', False)
@@ -121,7 +123,7 @@ class TradingBot:
             logger.info("Bot in CALIBRATION MODE. Tier 2 Engine (Optimizer/Ranker) suspended.")
             self.brain.set_disabled_scores(set())
             # We still run ranker update to track data, but don't apply filters
-            self.ranker.update_rankings(raw_perf)
+            self.ranker.update_rankings(all_perf)
             return
 
         logger.info("Running Tier 2 Strategy Optimization...")
@@ -140,7 +142,7 @@ class TradingBot:
         self.brain.set_disabled_scores(disabled)
 
         # 2. Symbol-Level Ranking
-        self.ranker.update_rankings(raw_perf)
+        self.ranker.update_rankings(all_perf)
 
     def _monitor_active_trades(self):
         """Checks if active trades hit TP or SL."""
@@ -197,7 +199,8 @@ class TradingBot:
                         self.telegram.alert_critical("Bot halted by Smart Kill Switch (3 consecutive losses).")
 
                     # Log to Sheets with High-Fidelity Data
-                    self.sheets.log_outcome(trade, outcome, net_pnl, total_fees)
+                    slippage = abs(trade['entry'] - trade.get('expected_entry', trade['entry']))
+                    self.sheets.log_outcome(trade, outcome, net_pnl, total_fees, slippage=slippage)
 
                     # Notify Telegram
                     emoji = "💰" if outcome == "WIN" else "📉"
@@ -265,14 +268,14 @@ class TradingBot:
                     self.telegram.alert_critical(f"Daily loss limit reached (${self.daily_pnl:.2f}). Trading halted.")
                     continue
 
+                # 2. Monitor Active Trades (TP/SL) - ALWAYS run this
+                self._monitor_active_trades()
+
                 # Tier 7: Daily Trade Frequency Control
                 if self.daily_trade_count >= self.risk.max_trades_per_day:
                     logger.warning(f"Daily trade limit reached ({self.risk.max_trades_per_day}). Scanning paused.")
                     time.sleep(3600)
                     continue
-
-                # 2. Monitor Active Trades (TP/SL)
-                self._monitor_active_trades()
 
                 # 3. Global Market Trend Filter
                 btc_df, _, _ = self.bybit.get_market_data("BTCUSDT")
@@ -284,8 +287,13 @@ class TradingBot:
                     time.sleep(300)
                     continue
 
-                # 4. Iterate through Halal Pairs
-                for symbol in config.HALAL_PAIRS:
+                # 4. Iterate through Halal Pairs (Sorted by Performance for Tier 8 Priority)
+                sorted_pairs = sorted(
+                    config.HALAL_PAIRS,
+                    key=lambda s: self.ranker.symbol_performance.get(s, 0.0),
+                    reverse=True
+                )
+                for symbol in sorted_pairs:
                     # Prevent multiple active trades for same symbol (Duplicate Guard)
                     if symbol in self.active_trades:
                         continue
@@ -432,12 +440,14 @@ class TradingBot:
                                     )
                                     
                                     # Active Trade Tracking with Tier 4 metadata
+                                    # Tier 8: Track expected price for slippage calculation
                                     new_trade = {
                                         "symbol": symbol,
                                         "score": decision['score'],
                                         "rr": rr,
                                         "risk_usdt": risk_usdt,
                                         "entry": result['price'],
+                                        "expected_entry": exec_price,
                                         "stop_loss": decision['stop_loss'],
                                         "take_profit": decision['take_profit'],
                                         "qty": result['qty'],
