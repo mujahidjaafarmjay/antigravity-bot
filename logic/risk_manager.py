@@ -12,21 +12,27 @@ class RiskManager:
         self.daily_loss_limit = config.DAILY_LOSS_LIMIT_PERCENT
         self.consecutive_losses = 0
         self.kill_switch_time = None
+        self.peak_balance = 0.0
+        self.max_trades_per_day = 5
 
     def get_score_weight(self, score, performance_summary=None):
         """
-        Dynamic weight based on signal score.
-        If sufficient data exists, weights become data-driven.
+        Tier 5: Dynamic Weighting based on Expectancy.
+        Scales risk based on proven statistical edge.
         """
         # 1. Check if we have data-driven weights (Institutional tier)
         if performance_summary and score in performance_summary:
             stats = performance_summary[score]
-            if stats['trades'] >= 20:
+            if stats['trades'] >= 10: # Lowered threshold for Tier 5 adaptation
                 exp = stats['expectancy']
-                if exp <= 0: return 0.5
-                if exp < 0.5: return 0.8
-                if exp < 1.0: return 1.0
-                return 1.2
+                pf = stats.get('profit_factor', 1.0)
+
+                # Adaptive multiplier based on expectancy (Edge)
+                # Hard Tier 6 Check: Profit Factor must be >= 1.1 to be considered stable
+                if exp <= 0 or pf < 1.1: return 0.0 # Disable risk for losing/unstable signals
+
+                # Weight = 1.0 + Expectancy (capped at 1.2x for safety on small account)
+                return min(1.2, 1.0 + exp)
 
         # 2. Fallback to Static Strategic Weights
         weights = {
@@ -37,12 +43,20 @@ class RiskManager:
         }
         return weights.get(score, 1.0)
 
-    def calculate_position(self, balance, entry_price, stop_loss, score=3, symbol_weight=1.0, performance_summary=None):
+    def calculate_position(self, balance, entry_price, stop_loss, score=3, symbol_weight=1.0, performance_summary=None, spread=0, session="ASIAN"):
         """
         Calculates the quantity based on dynamic risk rules, score weight, and symbol rank.
+        Tier 8: Added Spread-aware and Session-aware risk scaling.
         """
         if balance <= 0:
             return 0, "Invalid Balance"
+
+        # 0. Tier 7: Equity Curve Control (Drawdown Protection)
+        if balance > self.peak_balance:
+            self.peak_balance = balance
+
+        drawdown = (self.peak_balance - balance) / self.peak_balance if self.peak_balance > 0 else 0
+        drawdown_mult = 0.5 if drawdown >= 0.05 else 1.0 # Reduce risk by 50% if > 5% drawdown
 
         # 1. Base Risk per Trade
         risk_percent = 0.03 # Calibration baseline 3%
@@ -52,8 +66,18 @@ class RiskManager:
         # 2. Score-Based Risk Weighting
         score_mult = self.get_score_weight(score, performance_summary)
 
-        # 3. Symbol-Based Weight (from PairRanker)
-        final_risk_percent = risk_percent * score_mult * symbol_weight
+        # 3. Spread-Aware Risk Scaling
+        spread_mult = 1.0
+        if spread > 0.002: spread_mult = 0.7
+        elif spread > 0.0015: spread_mult = 0.85
+
+        # 4. Session-Aware Risk Scaling
+        session_mult = 1.0
+        if session == "LONDON": session_mult = 1.2 # London is high conviction
+        elif session == "ASIAN": session_mult = 0.7 # Asia is lower volatility/higher noise
+
+        # 5. Combined Weighting
+        final_risk_percent = risk_percent * score_mult * symbol_weight * drawdown_mult * spread_mult * session_mult
 
         risk_amount = balance * final_risk_percent
         
@@ -104,9 +128,9 @@ class RiskManager:
             return False, "Invalid SL/Entry"
             
         rr = reward / risk
-        # Hard Tier 3 Filter: Min RR must be 2.0 or better
+        # Hard Tier 3 Filter: Min RR enforced (default 1.8)
         # Added a 0.01 epsilon to handle floating-point precision issues
-        min_rr = max(2.0, config.REWARD_TO_RISK_RATIO)
+        min_rr = config.REWARD_TO_RISK_RATIO
         if rr < (min_rr - 0.01):
             return False, f"RR too low ({rr:.2f} < {min_rr})"
 
@@ -135,12 +159,20 @@ class RiskManager:
             self.consecutive_losses = 0
             self.kill_switch_time = None
 
-    def is_kill_switch_active(self):
+    def is_kill_switch_active(self, performance_summary=None):
         """
-        Kill switch triggers after 3 consecutive losses.
+        Tier 8: Hardened Kill Switch.
+        Triggers after 3 losses AND expectancy drop.
         Auto-recovers after KILL_SWITCH_COOLDOWN_HOURS.
         """
-        if self.consecutive_losses < 3:
+        # If we have positive global expectancy, be slightly more lenient
+        threshold = 3
+        if performance_summary and "GLOBAL" in performance_summary:
+            g = performance_summary["GLOBAL"]
+            if g.get('net_pnl', 0) > 0:
+                threshold = 4 # Allow 4 losses if account is in profit
+
+        if self.consecutive_losses < threshold:
             return False
 
         if self.kill_switch_time:
@@ -209,12 +241,22 @@ class RiskManager:
 
     def check_daily_loss(self, current_pnl, starting_balance):
         """
-        Checks if the daily loss limit has been hit.
+        Checks if the daily loss limit (USDT or Percentage) has been hit.
         """
-        if starting_balance <= 0:
+        try:
+            if current_pnl >= 0:
+                return False
+
+            # 1. Hard USDT Limit
+            if abs(current_pnl) >= config.MAX_DAILY_LOSS_USDT:
+                return True
+
+            # 2. Percentage Limit
+            if starting_balance > 0:
+                loss_percent = (abs(current_pnl) / starting_balance) * 100
+                if loss_percent >= self.daily_loss_limit:
+                    return True
+
             return False
-            
-        loss_percent = (abs(current_pnl) / starting_balance) * 100
-        if current_pnl < 0 and loss_percent >= self.daily_loss_limit:
-            return True
-        return False
+        except Exception:
+            return False

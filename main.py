@@ -39,18 +39,20 @@ class TradingBot:
         self.bybit = BybitHandler()
         self.brain = Brain()
         self.risk = RiskManager()
-        self.optimizer = StrategyOptimizer(min_trades_required=30)
-        self.ranker = PairRanker(min_trades_required=10)
+        self.optimizer = StrategyOptimizer(min_trades_required=10) # Tier 5: Faster adaptation
+        self.ranker = PairRanker(min_trades_required=5)
         self.sheets = SheetsPersistence()
         self.telegram = TelegramSender()
         self.cmd_handler = TelegramCommandHandler(self.telegram, self.bybit, self.sheets, self.risk)
         
+        self.utc = pytz.UTC
         self.cooldowns = {}
         self.daily_pnl = 0.0
         self.is_halted = False
         self.starting_balance = 0.0
         self.reported_signals = {} # Track last score sent to Telegram
         self.execution_lock = {} # Prevent duplicate execution attempts
+        self.daily_trade_count = 0 # Tier 7 Frequency Control
         self.active_trades = {} # Track open trades for P&L logging
         self.closed_trades_count = 0 # Counter to avoid aggressive optimization
         self.instance_id = datetime.now().strftime("%H%M%S") # Unique ID for this run
@@ -61,9 +63,22 @@ class TradingBot:
         """Recovers state and reconciles Sheets with Exchange reality."""
         logger.info("Recovering state from Google Sheets...")
         meta = self.sheets.get_meta()
-        self.daily_pnl = meta.get('daily_net_pnl', 0.0)
-        self.is_halted = meta.get('is_halted', False)
-        
+
+        # Daily PnL Reset Logic
+        last_run_str = self.sheets.get_bot_meta("last_reset_date")
+        today_str = datetime.now().strftime("%Y-%m-%d")
+
+        if last_run_str != today_str:
+            logger.info(f"New day detected ({today_str}). Resetting daily PnL and trade count.")
+            self.daily_pnl = 0.0
+            self.daily_trade_count = 0
+            self.is_halted = False
+            self.sheets.set_bot_meta("last_reset_date", today_str)
+            self.sheets.update_meta(0.0, False)
+        else:
+            self.daily_pnl = meta.get('daily_net_pnl', 0.0)
+            self.is_halted = meta.get('is_halted', False)
+
         # 1. Fetch truth from exchange
         open_orders = self.bybit.get_open_orders()
         exchange_symbols = [o['symbol'] for o in open_orders]
@@ -95,9 +110,12 @@ class TradingBot:
 
     def _run_optimization(self):
         """Fetches data and runs strategy optimizer and pair ranker (Respects CALIBRATION_MODE)."""
-        # Always fetch data first
-        raw_perf = self.sheets.get_all_performance_data()
-        summary = self.sheets.get_performance_summary(raw_perf)
+        # 1. Fetch data
+        all_perf = self.sheets.get_all_performance_data()
+
+        # 2. Tier 6: Rolling Window Performance (Last 30 trades for adaptation)
+        rolling_perf = all_perf[-30:] if len(all_perf) > 30 else all_perf
+        summary = self.sheets.get_performance_summary(rolling_perf)
 
         if config.CALIBRATION_MODE:
             logger.info("Bot in CALIBRATION MODE. Tier 2 Engine (Optimizer/Ranker) suspended.")
@@ -107,6 +125,9 @@ class TradingBot:
             return
 
         logger.info("Running Tier 2 Strategy Optimization...")
+
+        # Update Stats Tab in Sheets for visibility
+        self.sheets.update_stats_tab(summary)
 
         # 1. Score-Level Optimization
         disabled = self.optimizer.analyze_and_optimize(summary)
@@ -134,12 +155,24 @@ class TradingBot:
                     continue
 
                 outcome = None
+                exit_price = current_price
+
                 if current_price >= trade['take_profit']:
                     outcome = "WIN"
                     exit_price = trade['take_profit']
                 elif current_price <= trade['stop_loss']:
                     outcome = "LOSS"
                     exit_price = trade['stop_loss']
+                else:
+                    # Tier 8: Dead Trade Detection (4-hour time-based exit)
+                    if 'timestamp' in trade:
+                        try:
+                            start_time = datetime.strptime(trade['timestamp'], "%Y-%m-%d %H:%M:%S").replace(tzinfo=self.utc)
+                            duration_mins = int((datetime.now(self.utc) - start_time).total_seconds() / 60)
+                            if duration_mins >= 240: # 4 hours
+                                outcome = "TIME_EXIT"
+                                logger.info(f"⌛ DEAD TRADE DETECTION: Closing {symbol} after 4 hours.")
+                        except: pass
 
                 if outcome:
                     # Calculate PnL (Simplified Spot calculation)
@@ -158,8 +191,8 @@ class TradingBot:
 
                     # Track Loss Streak for Kill Switch
                     self.risk.update_loss_streak(outcome)
-                    if self.risk.is_kill_switch_active():
-                        logger.critical("🚨 SMART KILL SWITCH TRIGGERED: 3 consecutive losses. Bot halting.")
+                    if self.risk.is_kill_switch_active(perf_summary):
+                        logger.critical(f"🚨 SMART KILL SWITCH TRIGGERED: {self.risk.consecutive_losses} consecutive losses. Bot halting.")
                         self.is_halted = True
                         self.telegram.alert_critical("Bot halted by Smart Kill Switch (3 consecutive losses).")
 
@@ -178,8 +211,8 @@ class TradingBot:
                     # Remove from local memory
                     del self.active_trades[symbol]
 
-                    # Set mandatory cooldown to prevent immediate re-entry
-                    self.cooldowns[symbol] = datetime.now() + timedelta(minutes=config.COOLDOWN_MINUTES)
+                    # Set mandatory cooldown (Timezone Aware)
+                    self.cooldowns[symbol] = datetime.now(self.utc) + timedelta(minutes=config.COOLDOWN_MINUTES)
 
                     # Trigger Optimization periodically (every 10 trades)
                     self.closed_trades_count += 1
@@ -199,7 +232,7 @@ class TradingBot:
                 # 1. Safety Checks
                 if self.is_halted:
                     # Check if Kill Switch can auto-recover
-                    if not self.risk.is_kill_switch_active():
+                    if not self.risk.is_kill_switch_active(perf_summary):
                         logger.info("Bot auto-recovering from Smart Kill Switch...")
                         self.is_halted = False
                     else:
@@ -207,9 +240,10 @@ class TradingBot:
                         time.sleep(3600) # Check every hour
                         continue
 
-                # 1.5 Fetch Performance Snapshot for this iteration (reduces API calls)
-                raw_perf = self.sheets.get_all_performance_data()
-                perf_summary = self.sheets.get_performance_summary(raw_perf)
+                # 1.5 Fetch Performance Snapshot (Tier 6 Rolling Window)
+                all_perf = self.sheets.get_all_performance_data()
+                rolling_perf = all_perf[-30:] if len(all_perf) > 30 else all_perf
+                perf_summary = self.sheets.get_performance_summary(rolling_perf)
 
                 # Tier 4 Market Toxicity Check
                 if self.risk.is_market_toxic(perf_summary):
@@ -224,15 +258,17 @@ class TradingBot:
                     time.sleep(config.BALANCE_CACHE_SECONDS)
                     continue
 
-                # Check Daily Loss (Percentage and Hard USDT limit)
-                is_perc_loss = self.risk.check_daily_loss(self.daily_pnl, self.starting_balance)
-                is_usdt_loss = self.daily_pnl <= -config.MAX_DAILY_LOSS_USDT
-
-                if is_perc_loss or is_usdt_loss:
+                # Check Daily Loss (Hard USDT limit or Percentage)
+                if self.risk.check_daily_loss(self.daily_pnl, self.starting_balance):
                     self.is_halted = True
                     self.sheets.update_meta(self.daily_pnl, self.is_halted)
-                    reason = "Percentage Limit" if is_perc_loss else f"USDT Limit (${config.MAX_DAILY_LOSS_USDT})"
-                    self.telegram.alert_critical(f"Daily loss limit reached ({reason}). Trading halted.")
+                    self.telegram.alert_critical(f"Daily loss limit reached (${self.daily_pnl:.2f}). Trading halted.")
+                    continue
+
+                # Tier 7: Daily Trade Frequency Control
+                if self.daily_trade_count >= self.risk.max_trades_per_day:
+                    logger.warning(f"Daily trade limit reached ({self.risk.max_trades_per_day}). Scanning paused.")
+                    time.sleep(3600)
                     continue
 
                 # 2. Monitor Active Trades (TP/SL)
@@ -241,10 +277,11 @@ class TradingBot:
                 # 3. Global Market Trend Filter
                 btc_df, _, _ = self.bybit.get_market_data("BTCUSDT")
                 market_trend = self.brain.get_market_trend(btc_df)
+                self.brain.current_market_trend = market_trend # Pass to brain for soft filter
 
-                if market_trend != "bullish":
-                    logger.warning(f"Market Trend is {market_trend.upper()}. Skipping trade scanning to preserve capital.")
-                    time.sleep(300) # Sleep for 5 mins
+                if market_trend == "unknown":
+                    logger.warning("Market Trend UNKNOWN. Skipping trade scanning.")
+                    time.sleep(300)
                     continue
 
                 # 4. Iterate through Halal Pairs
@@ -253,10 +290,13 @@ class TradingBot:
                     if symbol in self.active_trades:
                         continue
 
-                    # Check Cooldown
+                    # 1. Strict Timezone-Aware Cooldown Check
+                    now = datetime.now(self.utc)
                     if symbol in self.cooldowns:
-                        if datetime.now() < self.cooldowns[symbol]:
+                        if now < self.cooldowns[symbol]:
                             continue
+                        else:
+                            del self.cooldowns[symbol]
                             
                     # Prevent re-attempting same trade too frequently
                     if symbol in self.execution_lock:
@@ -304,6 +344,8 @@ class TradingBot:
                         
                         if not valid:
                             logger.warning(f"⚠️ Trade Validation Failed for {symbol}: {reason}")
+                            # Apply short cooldown for blocked trades to avoid log spam
+                            self.cooldowns[symbol] = now + timedelta(minutes=5)
                             self.telegram.send_message(f"⚠️ <b>Trade Blocked: {symbol}</b>\nReason: {reason}")
                             continue
 
@@ -347,13 +389,16 @@ class TradingBot:
                             symbol_weight = 1.0 if config.CALIBRATION_MODE else self.ranker.get_symbol_weight(symbol)
 
                             # Use performance data for risk weighting if available
+                            spread_val = (ask - bid) / bid if bid > 0 else 0
                             qty, qty_reason = self.risk.calculate_position(
                                 balance,
                                 exec_price,
                                 decision['stop_loss'],
                                 score=decision['score'],
                                 symbol_weight=symbol_weight,
-                                performance_summary=perf_summary
+                                performance_summary=perf_summary,
+                                spread=spread_val,
+                                session=session
                             )
                             risk_usdt = qty * abs(exec_price - decision['stop_loss'])
                             if qty > 0:
@@ -376,6 +421,7 @@ class TradingBot:
                                 
                                 if result["success"]:
                                     # ✅ SUCCESS
+                                    self.daily_trade_count += 1
                                     order_id = result['order_id']
                                     logger.info(f"✅ SUCCESS: Trade executed for {symbol} | ID: {order_id}")
                                     self.telegram.send_message(
@@ -408,8 +454,8 @@ class TradingBot:
                                     trade_log['entry'] = result['price']
                                     self.sheets.log_trade(trade_log)
                                     
-                                    # Set final cooldown
-                                    self.cooldowns[symbol] = datetime.now() + timedelta(minutes=config.COOLDOWN_MINUTES)
+                                    # Set final cooldown (Timezone Aware)
+                                    self.cooldowns[symbol] = datetime.now(self.utc) + timedelta(minutes=config.COOLDOWN_MINUTES)
                                 else:
                                     # ❌ FAILURE
                                     err_msg = result["error"]

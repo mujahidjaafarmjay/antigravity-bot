@@ -17,6 +17,7 @@ class SheetsPersistence:
         self.perf_tab = None
         self.active_tab = None
         self.meta_tab = None
+        self.stats_tab = None
         self._connect()
 
     def _connect(self):
@@ -43,7 +44,7 @@ class SheetsPersistence:
             self.logger.error(f"Error connecting to Google Sheets: {e}")
 
     def _setup_tabs(self):
-        """Creates 'Trades', 'Performance', 'ActiveTrades', and 'BotMeta' tabs if they don't exist."""
+        """Creates 'Trades', 'Performance', 'ActiveTrades', 'Stats', and 'BotMeta' tabs if they don't exist."""
         try:
             # Trades Tab (Signal Log)
             try:
@@ -72,6 +73,15 @@ class SheetsPersistence:
                 self.active_tab.append_row([
                     "Symbol", "Score", "RR", "Risk_USDT", "Entry", "SL", "TP", "Qty",
                     "Session", "ATR_Perc", "Mode", "Timestamp"
+                ])
+
+            # Stats Tab (High-Level Summary)
+            try:
+                self.stats_tab = self.sheet.worksheet("Stats")
+            except gspread.WorksheetNotFound:
+                self.stats_tab = self.sheet.add_worksheet("Stats", rows=100, cols=10)
+                self.stats_tab.append_row([
+                    "Metric_Type", "Key", "Trades", "WinRate", "NetPnL", "Expectancy", "ProfitFactor", "AvgWin", "AvgLoss", "LastUpdate"
                 ])
 
             # BotMeta Tab
@@ -210,6 +220,42 @@ class SheetsPersistence:
         except Exception as e:
             self.logger.error(f"Error fetching performance data: {e}")
             return []
+
+    def update_stats_tab(self, summary):
+        """Updates the 'Stats' tab with the latest performance summary."""
+        if not self.stats_tab: return
+        try:
+            now = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
+            rows = []
+
+            # 1. Global Stats
+            g = summary.get("GLOBAL", {})
+            rows.append([
+                "GLOBAL", "ALL", g.get("trades", 0),
+                f"{g.get('wins', 0)/g.get('trades', 1):.1%}" if g.get('trades', 0) > 0 else "0%",
+                g.get("net_pnl", 0.0), 0, # Expectancy not defined for global here
+                f"{g.get('gross_win_pnl', 0) / g.get('gross_loss_pnl', 1):.2f}" if g.get('gross_loss_pnl', 0) > 0 else "1.0",
+                0, 0, now
+            ])
+
+            # 2. Score Stats
+            for key in sorted(summary.keys()):
+                if key == "GLOBAL": continue
+                s = summary[key]
+                rows.append([
+                    "SCORE", key, s["trades"], f"{s['win_rate']:.1%}",
+                    s["net_pnl"], s["expectancy"], s["profit_factor"],
+                    s["avg_win"], s["avg_loss"], now
+                ])
+
+            # Clear and Update
+            self.stats_tab.clear()
+            self.stats_tab.append_row([
+                "Metric_Type", "Key", "Trades", "WinRate", "NetPnL", "Expectancy", "ProfitFactor", "AvgWin", "AvgLoss", "LastUpdate"
+            ])
+            self.stats_tab.append_rows(rows)
+        except Exception as e:
+            self.logger.error(f"Error updating Stats tab: {e}")
 
     def get_performance_summary(self, data=None):
         """Calculates performance metrics grouped by score and global stats."""

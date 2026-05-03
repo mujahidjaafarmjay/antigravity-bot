@@ -16,6 +16,7 @@ class PairRanker:
         if not performance_data:
             return
 
+        self.symbol_trade_counts = {}
         stats = {}
         for row in performance_data:
             symbol = row.get('Symbol')
@@ -44,6 +45,7 @@ class PairRanker:
                 avg_loss = sum(s["loss_amounts"]) / len(s["loss_amounts"]) if s["loss_amounts"] else 0
                 expectancy = (win_rate * avg_win) - ((1 - win_rate) * avg_loss)
                 new_rankings[symbol] = expectancy
+                self.symbol_trade_counts[symbol] = total_trades
                 self.logger.info(f"Symbol Rank: {symbol} | Exp: {expectancy:.4f} ({total_trades} trades)")
 
         self.symbol_performance = new_rankings
@@ -61,8 +63,11 @@ class PairRanker:
         return 1.0
 
     def should_skip_symbol(self, symbol):
-        """Hard filter for toxic symbols."""
+        """Hard filter for toxic symbols (Tier 7: Skip any negative expectancy)."""
         if symbol in self.symbol_performance:
-            if self.symbol_performance[symbol] < -5.0: # Deeply negative expectancy
+            # If we have 10+ trades and expectancy is negative, it's a toxic pair for our strategy
+            # Using 10 trades for a more stable statistical sample.
+            trades = getattr(self, 'symbol_trade_counts', {}).get(symbol, 0)
+            if trades >= 10 and self.symbol_performance[symbol] <= 0:
                 return True
         return False

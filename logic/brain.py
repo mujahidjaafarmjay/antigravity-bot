@@ -26,6 +26,7 @@ class Brain:
         """
         Determines the Global Market Trend using BTC as the driver.
         Returns 'bullish' or 'bearish'.
+        Tier 7: Added RSI momentum filter to reduce sideways traps.
         """
         if btc_df is None or len(btc_df) < config.MA_SLOW:
             return "unknown"
@@ -33,10 +34,21 @@ class Brain:
         btc_df['ma50'] = btc_df['close'].rolling(window=config.MA_FAST).mean()
         btc_df['ma200'] = btc_df['close'].rolling(window=config.MA_SLOW).mean()
 
+        # Calculate RSI (14)
+        delta = btc_df['close'].diff()
+        gain = (delta.where(delta > 0, 0)).rolling(window=14).mean()
+        loss = (-delta.where(delta < 0, 0)).rolling(window=14).mean()
+        rs = gain / loss
+        btc_df['rsi'] = 100 - (100 / (1 + rs))
+
         current_ma50 = btc_df['ma50'].iloc[-2]
         current_ma200 = btc_df['ma200'].iloc[-2]
+        current_rsi = btc_df['rsi'].iloc[-2]
 
-        return "bullish" if current_ma50 > current_ma200 else "bearish"
+        # Bullish only if MA50 > MA200 AND RSI > 50 (Positive Momentum)
+        if current_ma50 > current_ma200 and current_rsi > 50:
+            return "bullish"
+        return "bearish"
 
     def _is_session_active(self):
         """
@@ -125,9 +137,17 @@ class Brain:
             return self._hold(symbol, f"Trend Fail: MA50 ({current_ma50:.2f}) <= MA200 ({current_ma200:.2f})")
 
         action = "HOLD"
-        # Determine action threshold (Strict threshold vs Calibration MIN_SCORE)
-        # Note: Brain always assigns action labels, main.py decides whether to execute.
-        threshold = config.MIN_SCORE_TO_TRADE if config.CALIBRATION_MODE else config.SCORE_THRESHOLD
+        # Determine action threshold (Soft Regime Filter)
+        # Bullish BTC: Trade Score 3+ | Bearish BTC: Only Trade Score 5+
+        # We'll need the global market trend passed in or calculated here
+        market_trend = getattr(self, 'current_market_trend', "bullish")
+
+        # During Calibration, we log Score 3 regardless of trend
+        if config.CALIBRATION_MODE:
+            threshold = config.MIN_SCORE_TO_TRADE
+        else:
+            # Tier 5 Regime Filter: Protect capital during bearish/unknown markets
+            threshold = config.SCORE_THRESHOLD if market_trend == "bullish" else 5
 
         if score in self.disabled_scores:
             action = "HOLD (DISABLED BY OPTIMIZER)"
