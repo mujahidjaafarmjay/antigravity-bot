@@ -194,8 +194,10 @@ class TelegramCommandHandler:
                 )
                 print("[Telegram] Listener started")
                 await app.initialize()
+                # Fix Bug: drop_pending_updates=True to avoid Conflict Error
+                await app.bot.delete_webhook(drop_pending_updates=True)
                 await app.start()
-                await app.updater.start_polling()
+                await app.updater.start_polling(drop_pending_updates=True)
                 while True:
                     await asyncio.sleep(3600)
             except Exception as e:

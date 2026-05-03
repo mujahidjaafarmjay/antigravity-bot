@@ -19,7 +19,7 @@ TRADING_MODE = "live" if MODE == "live" else "paper"
 # ── Production Safety & Calibration ──────────────────────────
 ENABLE_LIVE_TRADING  = os.environ.get("ENABLE_LIVE_TRADING", "False").lower() == "true"
 CALIBRATION_MODE      = os.environ.get("CALIBRATION_MODE", "True").lower() == "true"
-MAX_DAILY_LOSS_USDT   = float(os.environ.get("MAX_DAILY_LOSS_USDT", "3.0"))
+MAX_DAILY_LOSS_USDT   = float(os.environ.get("MAX_DAILY_LOSS_USDT", "2.0"))
 KILL_SWITCH_COOLDOWN_HOURS = int(os.environ.get("KILL_SWITCH_COOLDOWN", "6"))
 
 # ── Tier 4 Volatility & Equity Protection ────────────────────
@@ -44,10 +44,11 @@ HALAL_PAIRS = [
 
 # ── Risk Management ──────────────────────────────────────────
 # Risk per trade is dynamic (calculated in risk_manager.py)
-MAX_OPEN_TRADES            = int(os.environ.get("MAX_OPEN_TRADES", "2"))
+MAX_OPEN_TRADES            = int(os.environ.get("MAX_OPEN_TRADES", "1")) # Capped to 1 for $40
 DAILY_LOSS_LIMIT_PERCENT   = float(os.environ.get("DAILY_LOSS_LIMIT", "5.0"))
 REWARD_TO_RISK_RATIO       = 2.2  # Gross RR to cover fees (1:2.0 net)
 MAX_POSITION_SIZE_PERCENT  = 40.0 # Max 40% of balance per trade
+MAX_POSITION_SIZE_USDT     = 10.0 # Hard cap for small accounts
 MIN_TRADE_USDT             = 6.0  # Bybit minimum is ~$5, we use $6 for safety
 
 # ── Strategy Constants ───────────────────────────────────────

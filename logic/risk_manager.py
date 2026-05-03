@@ -45,8 +45,11 @@ class RiskManager:
         # 3. Quantity based on Risk
         qty = risk_amount / risk_per_unit
         
-        # 4. Max Position Size Constraint (40% of balance)
-        max_notional = balance * (config.MAX_POSITION_SIZE_PERCENT / 100)
+        # 4. Max Position Size Constraint (Percentage and Hard USD Cap)
+        max_notional_perc = balance * (config.MAX_POSITION_SIZE_PERCENT / 100)
+        max_notional_usdt = config.MAX_POSITION_SIZE_USDT
+        max_notional = min(max_notional_perc, max_notional_usdt)
+
         actual_notional = qty * entry_price
         
         if actual_notional > max_notional:
