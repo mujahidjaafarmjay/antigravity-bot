@@ -15,6 +15,8 @@ class StrategyOptimizer:
     def analyze_and_optimize(self, performance_summary):
         """
         Processes performance summary and updates allowed scores.
+        Only disables Score 3/4 if they have enough data (min_trades).
+        Score 5/6 are protected unless they show deep negative edge.
         """
         if not performance_summary:
             self.logger.info("No performance data available for optimization.")
@@ -23,7 +25,10 @@ class StrategyOptimizer:
         new_disabled = set()
         self.performance_cache = performance_summary
 
-        for score, metrics in performance_summary.items():
+        for key, metrics in performance_summary.items():
+            if key == "GLOBAL": continue
+
+            score = key
             trades = metrics['trades']
             expectancy = metrics['expectancy']
             profit_factor = metrics['profit_factor']
@@ -31,22 +36,30 @@ class StrategyOptimizer:
             self.logger.info(f"Analyzing Score {score}: {trades} trades, Expectancy: {expectancy:.4f}, PF: {profit_factor:.2f}")
 
             # Optimization Rules:
-            # 1. Statistical Edge Check (Expectancy & Profit Factor)
+            # 1. Statistical Edge Check
             if trades >= self.min_trades:
-                # PF < 1.1 or Expectancy <= 0 are indicators of a losing or barely-breakeven system
-                if expectancy <= 0 or profit_factor < 1.1:
+                # Stricter for Score 3
+                threshold_pf = 1.1 if score <= 4 else 0.9
+
+                if expectancy <= 0 or profit_factor < threshold_pf:
                     self.logger.warning(f"🚫 Score {score} failed statistical edge check (Exp: {expectancy:.4f}, PF: {profit_factor:.2f}). Disabling.")
                     new_disabled.add(score)
                 else:
                     self.logger.info(f"✅ Score {score} remains ENABLED (Expectancy: {expectancy:.4f}, PF: {profit_factor:.2f}).")
             else:
-                self.logger.info(f"⏳ Score {score} still in validation phase ({trades}/{self.min_trades} trades).")
+                # Protection for high-conviction scores with small samples
+                if score >= 5 and expectancy < -2.0:
+                    self.logger.error(f"🚨 Score {score} showing EXTREME negative edge early. Safety disabling.")
+                    new_disabled.add(score)
+                else:
+                    self.logger.info(f"⏳ Score {score} still in validation phase ({trades}/{self.min_trades} trades).")
 
         self.disabled_scores = new_disabled
         return self.disabled_scores
 
     def is_score_allowed(self, score):
-        """Checks if a score level is currently allowed by the optimizer."""
+        """Checks if a score level is currently allowed by the optimizer (Always allow 4+ during calibration)."""
+        if score >= 4: return True
         return score not in self.disabled_scores
 
     def get_optimization_report(self):

@@ -38,8 +38,8 @@ class TradingBot:
         self.bybit = BybitHandler()
         self.brain = Brain()
         self.risk = RiskManager()
-        self.optimizer = StrategyOptimizer(min_trades_required=20)
-        self.ranker = PairRanker(min_trades_required=5)
+        self.optimizer = StrategyOptimizer(min_trades_required=30)
+        self.ranker = PairRanker(min_trades_required=10)
         self.sheets = SheetsPersistence()
         self.telegram = TelegramSender()
         self.cmd_handler = TelegramCommandHandler(self.telegram, self.bybit, self.sheets, self.risk)
@@ -57,14 +57,33 @@ class TradingBot:
         self._recover_state()
 
     def _recover_state(self):
-        """Recovers state from Google Sheets on startup."""
+        """Recovers state and reconciles Sheets with Exchange reality."""
         logger.info("Recovering state from Google Sheets...")
         meta = self.sheets.get_meta()
         self.daily_pnl = meta.get('daily_net_pnl', 0.0)
         self.is_halted = meta.get('is_halted', False)
         
-        # Recover Active Trades
-        self.active_trades = self.sheets.get_active_trades()
+        # 1. Fetch truth from exchange
+        open_orders = self.bybit.get_open_orders()
+        exchange_symbols = [o['symbol'] for o in open_orders]
+
+        # 2. Recover from Sheets
+        sheets_trades = self.sheets.get_active_trades()
+        reconciled = {}
+
+        for symbol, trade in sheets_trades.items():
+            # In LIVE mode, Sheets MUST match Exchange
+            if config.TRADING_MODE == "live":
+                if symbol in exchange_symbols:
+                    reconciled[symbol] = trade
+                else:
+                    logger.warning(f"Purging ghost trade from Sheets: {symbol} (Not open on Bybit)")
+                    self.sheets.remove_active_trade(symbol)
+            else:
+                # In PAPER mode, we trust Sheets
+                reconciled[symbol] = trade
+
+        self.active_trades = reconciled
 
         # Run Initial Optimization
         self._run_optimization()
@@ -75,15 +94,20 @@ class TradingBot:
 
     def _run_optimization(self):
         """Fetches data and runs strategy optimizer and pair ranker (Respects CALIBRATION_MODE)."""
+        # Always fetch data first
+        raw_perf = self.sheets.get_all_performance_data()
+        summary = self.sheets.get_performance_summary(raw_perf)
+
         if config.CALIBRATION_MODE:
             logger.info("Bot in CALIBRATION MODE. Tier 2 Engine (Optimizer/Ranker) suspended.")
             self.brain.set_disabled_scores(set())
+            # We still run ranker update to track data, but don't apply filters
+            self.ranker.update_rankings(raw_perf)
             return
 
         logger.info("Running Tier 2 Strategy Optimization...")
 
         # 1. Score-Level Optimization
-        summary = self.sheets.get_performance_summary()
         disabled = self.optimizer.analyze_and_optimize(summary)
 
         if disabled:
@@ -94,7 +118,6 @@ class TradingBot:
         self.brain.set_disabled_scores(disabled)
 
         # 2. Symbol-Level Ranking
-        raw_perf = self.sheets.get_all_performance_data()
         self.ranker.update_rankings(raw_perf)
 
     def _monitor_active_trades(self):
@@ -130,19 +153,17 @@ class TradingBot:
 
                     # Update Daily PnL
                     self.daily_pnl += net_pnl
+                    self.sheets.update_meta(self.daily_pnl, self.is_halted) # Persist immediately
 
-                    # Log to Sheets
-                    self.sheets.log_outcome(
-                        symbol=symbol,
-                        score=trade['score'],
-                        entry=trade['entry'],
-                        sl=trade['stop_loss'],
-                        tp=trade['take_profit'],
-                        outcome=outcome,
-                        pnl=net_pnl,
-                        fees=total_fees,
-                        mode=config.MODE
-                    )
+                    # Track Loss Streak for Kill Switch
+                    self.risk.update_loss_streak(outcome)
+                    if self.risk.is_kill_switch_active():
+                        logger.critical("🚨 SMART KILL SWITCH TRIGGERED: 3 consecutive losses. Bot halting.")
+                        self.is_halted = True
+                        self.telegram.alert_critical("Bot halted by Smart Kill Switch (3 consecutive losses).")
+
+                    # Log to Sheets with High-Fidelity Data
+                    self.sheets.log_outcome(trade, outcome, net_pnl, total_fees)
 
                     # Notify Telegram
                     emoji = "💰" if outcome == "WIN" else "📉"
@@ -176,8 +197,24 @@ class TradingBot:
             try:
                 # 1. Safety Checks
                 if self.is_halted:
-                    logger.warning("Bot is currently HALTED due to daily loss limit.")
-                    time.sleep(3600) # Check every hour if still halted
+                    # Check if Kill Switch can auto-recover
+                    if not self.risk.is_kill_switch_active():
+                        logger.info("Bot auto-recovering from Smart Kill Switch...")
+                        self.is_halted = False
+                    else:
+                        logger.warning("Bot is currently HALTED (Daily Loss or Kill Switch).")
+                        time.sleep(3600) # Check every hour
+                        continue
+
+                # 1.5 Fetch Performance Snapshot for this iteration (reduces API calls)
+                raw_perf = self.sheets.get_all_performance_data()
+                perf_summary = self.sheets.get_performance_summary(raw_perf)
+
+                # Tier 4 Market Toxicity Check
+                if self.risk.is_market_toxic(perf_summary):
+                    logger.critical("🚨 MARKET TOXIC: Total expectancy deeply negative. Pausing bot.")
+                    self.telegram.alert_critical("Bot paused: Market conditions are toxic (Negative Expectancy).")
+                    time.sleep(3600 * 4) # Pause for 4 hours
                     continue
 
                 balance = self.bybit.get_balance()
@@ -200,7 +237,16 @@ class TradingBot:
                 # 2. Monitor Active Trades (TP/SL)
                 self._monitor_active_trades()
 
-                # 3. Iterate through Halal Pairs
+                # 3. Global Market Trend Filter
+                btc_df, _, _ = self.bybit.get_market_data("BTCUSDT")
+                market_trend = self.brain.get_market_trend(btc_df)
+
+                if market_trend != "bullish":
+                    logger.warning(f"Market Trend is {market_trend.upper()}. Skipping trade scanning to preserve capital.")
+                    time.sleep(300) # Sleep for 5 mins
+                    continue
+
+                # 4. Iterate through Halal Pairs
                 for symbol in config.HALAL_PAIRS:
                     # Prevent multiple active trades for same symbol (Duplicate Guard)
                     if symbol in self.active_trades:
@@ -224,6 +270,11 @@ class TradingBot:
 
                     # Evaluate Trade
                     decision = self.brain.evaluate_trade(symbol, df, balance)
+
+                    # Tier 4 Volatility Guard
+                    if self.risk.is_volatility_too_high(df):
+                        logger.warning(f"⚠️ Volatility Spike detected for {symbol}. Skipping entry.")
+                        continue
                     logger.info(f"Decision for {symbol}: {decision['action']} (Score: {decision['score']}) - {decision['reason']}")
 
                     # Debug Telegram (Only if score is new or changed to avoid spam)
@@ -240,6 +291,12 @@ class TradingBot:
                     self.reported_signals[symbol] = decision['score']
 
                     if decision['action'] in ["BUY", "STRONG BUY"]:
+                        # Tier 4 Equity Protection Check (Uses cached snapshot)
+                        if self.risk.is_equity_under_pressure(perf_summary):
+                            logger.warning(f"⚠️ Equity Protection: Recent PF < {config.EQUITY_PROTECT_THRESHOLD}. Skipping {symbol}.")
+                            self.telegram.send_message(f"⚠️ <b>Equity Guard:</b> Skipping {symbol} due to recent performance pressure.")
+                            continue
+
                         # Validate with Risk Manager
                         open_orders = self.bybit.get_open_orders()
                         valid, reason = self.risk.validate_trade(decision, balance, len(open_orders), bid, ask)
@@ -273,17 +330,31 @@ class TradingBot:
                                 logger.warning(f"PairRanker: Skipping {symbol} due to toxic performance history.")
                                 continue
 
-                            # 5. Calculate Qty with Risk Scaling (Respects CALIBRATION_MODE)
-                            symbol_weight = 1.0 if config.CALIBRATION_MODE else self.ranker.get_symbol_weight(symbol)
-                            score_scaling = 3 if config.CALIBRATION_MODE else decision['score']
+                            # 5. Calculate Metrics for Logging
+                            rr = abs((decision['take_profit'] - exec_price) / (exec_price - decision['stop_loss']))
+                            atr = decision.get('atr', 0) # We might need Brain to return this
+                            atr_perc = (atr / exec_price) * 100 if atr else 0
 
+                            # Session Labeling
+                            now_hour = datetime.now(pytz.UTC).hour
+                            session = "ASIAN"
+                            if 8 <= now_hour < 13: session = "LONDON"
+                            elif 13 <= now_hour < 17: session = "NY/LONDON"
+                            elif 17 <= now_hour < 21: session = "NY"
+
+                            # 6. Calculate Qty with Risk Scaling (Respects CALIBRATION_MODE)
+                            symbol_weight = 1.0 if config.CALIBRATION_MODE else self.ranker.get_symbol_weight(symbol)
+
+                            # Use performance data for risk weighting if available
                             qty, qty_reason = self.risk.calculate_position(
                                 balance,
                                 exec_price,
                                 decision['stop_loss'],
-                                score=score_scaling,
-                                symbol_weight=symbol_weight
+                                score=decision['score'],
+                                symbol_weight=symbol_weight,
+                                performance_summary=perf_summary
                             )
+                            risk_usdt = qty * abs(exec_price - decision['stop_loss'])
                             if qty > 0:
                                 # 5. Lock execution BEFORE attempt to prevent race conditions
                                 self.execution_lock[symbol] = datetime.now() + timedelta(minutes=15)
@@ -313,14 +384,19 @@ class TradingBot:
                                         f"ID: {order_id}"
                                     )
                                     
-                                    # Active Trade Tracking
+                                    # Active Trade Tracking with Tier 4 metadata
                                     new_trade = {
                                         "symbol": symbol,
                                         "score": decision['score'],
+                                        "rr": rr,
+                                        "risk_usdt": risk_usdt,
                                         "entry": result['price'],
                                         "stop_loss": decision['stop_loss'],
                                         "take_profit": decision['take_profit'],
-                                        "qty": result['qty']
+                                        "qty": result['qty'],
+                                        "session": session,
+                                        "atr_perc": atr_perc,
+                                        "timestamp": datetime.now().strftime("%Y-%m-%d %H:%M:%S")
                                     }
                                     self.active_trades[symbol] = new_trade
                                     self.sheets.add_active_trade(new_trade)

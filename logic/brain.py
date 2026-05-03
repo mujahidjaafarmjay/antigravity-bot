@@ -22,6 +22,22 @@ class Brain:
         """Checks if the symbol is in the Sharia-compliant whitelist."""
         return symbol in self.halal_pairs
 
+    def get_market_trend(self, btc_df):
+        """
+        Determines the Global Market Trend using BTC as the driver.
+        Returns 'bullish' or 'bearish'.
+        """
+        if btc_df is None or len(btc_df) < config.MA_SLOW:
+            return "unknown"
+
+        btc_df['ma50'] = btc_df['close'].rolling(window=config.MA_FAST).mean()
+        btc_df['ma200'] = btc_df['close'].rolling(window=config.MA_SLOW).mean()
+
+        current_ma50 = btc_df['ma50'].iloc[-2]
+        current_ma200 = btc_df['ma200'].iloc[-2]
+
+        return "bullish" if current_ma50 > current_ma200 else "bearish"
+
     def _is_session_active(self):
         """
         Session Filter: Avoids high-noise/low-liquidity periods.
@@ -109,11 +125,15 @@ class Brain:
             return self._hold(symbol, f"Trend Fail: MA50 ({current_ma50:.2f}) <= MA200 ({current_ma200:.2f})")
 
         action = "HOLD"
+        # Determine action threshold (Strict threshold vs Calibration MIN_SCORE)
+        # Note: Brain always assigns action labels, main.py decides whether to execute.
+        threshold = config.MIN_SCORE_TO_TRADE if config.CALIBRATION_MODE else config.SCORE_THRESHOLD
+
         if score in self.disabled_scores:
             action = "HOLD (DISABLED BY OPTIMIZER)"
-        elif score >= config.SCORE_THRESHOLD + 1:
+        elif score >= threshold + 1:
             action = "STRONG BUY"
-        elif score >= config.SCORE_THRESHOLD:
+        elif score >= threshold:
             action = "BUY"
         elif score >= 2:
             action = "WATCH"
@@ -130,6 +150,7 @@ class Brain:
             "entry": current_price,
             "stop_loss": stop_loss,
             "take_profit": take_profit,
+            "atr": atr,
             "reason": " | ".join(reasons) if reasons else "Trend OK, but no extra signals",
             "sharia_status": "Verified"
         }

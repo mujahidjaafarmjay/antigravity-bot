@@ -1,4 +1,5 @@
 import config
+from datetime import datetime, timedelta
 
 class RiskManager:
     """
@@ -9,29 +10,51 @@ class RiskManager:
     def __init__(self):
         self.max_open_trades = config.MAX_OPEN_TRADES
         self.daily_loss_limit = config.DAILY_LOSS_LIMIT_PERCENT
+        self.consecutive_losses = 0
+        self.kill_switch_time = None
 
-    def calculate_position(self, balance, entry_price, stop_loss, score=3, symbol_weight=1.0):
+    def get_score_weight(self, score, performance_summary=None):
         """
-        Calculates the quantity based on dynamic risk rules, score confluence, and symbol rank.
+        Dynamic weight based on signal score.
+        If sufficient data exists, weights become data-driven.
+        """
+        # 1. Check if we have data-driven weights (Institutional tier)
+        if performance_summary and score in performance_summary:
+            stats = performance_summary[score]
+            if stats['trades'] >= 20:
+                exp = stats['expectancy']
+                if exp <= 0: return 0.5
+                if exp < 0.5: return 0.8
+                if exp < 1.0: return 1.0
+                return 1.2
+
+        # 2. Fallback to Static Strategic Weights
+        weights = {
+            3: 0.5,
+            4: 1.0,
+            5: 1.2,
+            6: 1.5
+        }
+        return weights.get(score, 1.0)
+
+    def calculate_position(self, balance, entry_price, stop_loss, score=3, symbol_weight=1.0, performance_summary=None):
+        """
+        Calculates the quantity based on dynamic risk rules, score weight, and symbol rank.
         """
         if balance <= 0:
             return 0, "Invalid Balance"
 
         # 1. Base Risk per Trade
-        risk_percent = 0.02 # Default 2%
+        risk_percent = 0.03 # Calibration baseline 3%
         if balance < 30:
-            risk_percent = 0.01 # 1% for very small accounts
+            risk_percent = 0.015 # 1.5% for small balance
 
-        # 2. Score-Based Risk Scaling (Confluence Boost)
-        # Score 3: 100% of base risk
-        # Score 4: 110%
-        # Score 5: 120%
-        # Score 6+: 130%
-        confluence_mult = 1.0 + (max(0, score - 3) * 0.1)
+        # 2. Score-Based Risk Weighting
+        score_mult = self.get_score_weight(score, performance_summary)
 
         # 3. Symbol-Based Weight (from PairRanker)
-        final_risk_percent = risk_percent * confluence_mult * symbol_weight
-        
+        final_risk_percent = risk_percent * score_mult * symbol_weight
+
         risk_amount = balance * final_risk_percent
         
         # 2. Risk per Unit
@@ -42,8 +65,11 @@ class RiskManager:
         # 3. Quantity based on Risk
         qty = risk_amount / risk_per_unit
         
-        # 4. Max Position Size Constraint (40% of balance)
-        max_notional = balance * (config.MAX_POSITION_SIZE_PERCENT / 100)
+        # 4. Max Position Size Constraint (Percentage and Hard USD Cap)
+        max_notional_perc = balance * (config.MAX_POSITION_SIZE_PERCENT / 100)
+        max_notional_usdt = config.MAX_POSITION_SIZE_USDT
+        max_notional = min(max_notional_perc, max_notional_usdt)
+
         actual_notional = qty * entry_price
         
         if actual_notional > max_notional:
@@ -78,8 +104,10 @@ class RiskManager:
             return False, "Invalid SL/Entry"
             
         rr = reward / risk
-        if rr < config.REWARD_TO_RISK_RATIO:
-            return False, f"RR too low ({rr:.2f} < {config.REWARD_TO_RISK_RATIO})"
+        # Hard Tier 3 Filter: Min RR must be 2.0 or better
+        min_rr = max(2.0, config.REWARD_TO_RISK_RATIO)
+        if rr < min_rr:
+            return False, f"RR too low ({rr:.2f} < {min_rr})"
 
         # 4. Spread Protection
         if bid <= 0:
@@ -95,6 +123,88 @@ class RiskManager:
         """Resets the daily halt flag."""
         # This is used by the command handler to resume trading
         pass
+
+    def update_loss_streak(self, outcome):
+        """Tracks consecutive losses for the Smart Kill Switch."""
+        if outcome == "LOSS":
+            self.consecutive_losses += 1
+            if self.consecutive_losses >= 3:
+                self.kill_switch_time = datetime.now()
+        else:
+            self.consecutive_losses = 0
+            self.kill_switch_time = None
+
+    def is_kill_switch_active(self):
+        """
+        Kill switch triggers after 3 consecutive losses.
+        Auto-recovers after KILL_SWITCH_COOLDOWN_HOURS.
+        """
+        if self.consecutive_losses < 3:
+            return False
+
+        if self.kill_switch_time:
+            elapsed = datetime.now() - self.kill_switch_time
+            if elapsed > timedelta(hours=config.KILL_SWITCH_COOLDOWN_HOURS):
+                self.consecutive_losses = 0 # Auto-reset
+                self.kill_switch_time = None
+                return False
+
+        return True
+
+    def is_volatility_too_high(self, df):
+        """
+        Volatility Filter: Detects sudden price spikes or extreme wicks.
+        Skips entry if current candle volatility is > 2.5x ATR.
+        """
+        if df is None or len(df) < 20:
+            return False
+
+        # 1. Calculate ATR (Simplified)
+        high_low = df['high'] - df['low']
+        atr = high_low.rolling(window=config.VOLATILITY_LOOKBACK).mean().iloc[-2]
+
+        # 2. Current Candle Volatility
+        current_vol = df['high'].iloc[-1] - df['low'].iloc[-1]
+
+        if current_vol > (atr * config.VOLATILITY_LIMIT_MULT):
+            return True
+        return False
+
+    def is_equity_under_pressure(self, performance_summary):
+        """
+        Equity Curve Protection:
+        Uses the 'GLOBAL' container for absolute consistency.
+        """
+        if not performance_summary or "GLOBAL" not in performance_summary:
+            return False
+
+        g = performance_summary["GLOBAL"]
+        if g['trades'] < config.EQUITY_PROTECT_TRADES:
+            return False
+
+        if g['gross_loss_pnl'] > 0:
+            pf = g['gross_win_pnl'] / g['gross_loss_pnl']
+            if pf < config.EQUITY_PROTECT_THRESHOLD:
+                return True
+        return False
+
+    def is_market_toxic(self, performance_summary):
+        """
+        Bad Market Filter:
+        Detects if recent global Profit Factor is below critical threshold.
+        """
+        if not performance_summary or "GLOBAL" not in performance_summary:
+            return False
+
+        g = performance_summary["GLOBAL"]
+        if g['trades'] < 10:
+            return False
+
+        if g['gross_loss_pnl'] > 0:
+            pf = g['gross_win_pnl'] / g['gross_loss_pnl']
+            if pf < 0.8: # Market is toxic if we're losing > 20% more than we win
+                return True
+        return False
 
     def check_daily_loss(self, current_pnl, starting_balance):
         """
