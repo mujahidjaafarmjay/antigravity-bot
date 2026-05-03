@@ -38,8 +38,8 @@ class TradingBot:
         self.bybit = BybitHandler()
         self.brain = Brain()
         self.risk = RiskManager()
-        self.optimizer = StrategyOptimizer(min_trades_required=20)
-        self.ranker = PairRanker(min_trades_required=5)
+        self.optimizer = StrategyOptimizer(min_trades_required=30)
+        self.ranker = PairRanker(min_trades_required=10)
         self.sheets = SheetsPersistence()
         self.telegram = TelegramSender()
         self.cmd_handler = TelegramCommandHandler(self.telegram, self.bybit, self.sheets, self.risk)
@@ -57,14 +57,33 @@ class TradingBot:
         self._recover_state()
 
     def _recover_state(self):
-        """Recovers state from Google Sheets on startup."""
+        """Recovers state and reconciles Sheets with Exchange reality."""
         logger.info("Recovering state from Google Sheets...")
         meta = self.sheets.get_meta()
         self.daily_pnl = meta.get('daily_net_pnl', 0.0)
         self.is_halted = meta.get('is_halted', False)
         
-        # Recover Active Trades
-        self.active_trades = self.sheets.get_active_trades()
+        # 1. Fetch truth from exchange
+        open_orders = self.bybit.get_open_orders()
+        exchange_symbols = [o['symbol'] for o in open_orders]
+
+        # 2. Recover from Sheets
+        sheets_trades = self.sheets.get_active_trades()
+        reconciled = {}
+
+        for symbol, trade in sheets_trades.items():
+            # In LIVE mode, Sheets MUST match Exchange
+            if config.TRADING_MODE == "live":
+                if symbol in exchange_symbols:
+                    reconciled[symbol] = trade
+                else:
+                    logger.warning(f"Purging ghost trade from Sheets: {symbol} (Not open on Bybit)")
+                    self.sheets.remove_active_trade(symbol)
+            else:
+                # In PAPER mode, we trust Sheets
+                reconciled[symbol] = trade
+
+        self.active_trades = reconciled
 
         # Run Initial Optimization
         self._run_optimization()
@@ -130,6 +149,13 @@ class TradingBot:
 
                     # Update Daily PnL
                     self.daily_pnl += net_pnl
+
+                    # Track Loss Streak for Kill Switch
+                    self.risk.update_loss_streak(outcome)
+                    if self.risk.is_kill_switch_active():
+                        logger.critical("🚨 SMART KILL SWITCH TRIGGERED: 3 consecutive losses. Bot halting.")
+                        self.is_halted = True
+                        self.telegram.alert_critical("Bot halted by Smart Kill Switch (3 consecutive losses).")
 
                     # Log to Sheets
                     self.sheets.log_outcome(

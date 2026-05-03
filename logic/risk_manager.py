@@ -9,6 +9,7 @@ class RiskManager:
     def __init__(self):
         self.max_open_trades = config.MAX_OPEN_TRADES
         self.daily_loss_limit = config.DAILY_LOSS_LIMIT_PERCENT
+        self.consecutive_losses = 0
 
     def calculate_position(self, balance, entry_price, stop_loss, score=3, symbol_weight=1.0):
         """
@@ -78,8 +79,10 @@ class RiskManager:
             return False, "Invalid SL/Entry"
             
         rr = reward / risk
-        if rr < config.REWARD_TO_RISK_RATIO:
-            return False, f"RR too low ({rr:.2f} < {config.REWARD_TO_RISK_RATIO})"
+        # Hard Tier 3 Filter: Min RR must be 2.0 or better
+        min_rr = max(2.0, config.REWARD_TO_RISK_RATIO)
+        if rr < min_rr:
+            return False, f"RR too low ({rr:.2f} < {min_rr})"
 
         # 4. Spread Protection
         if bid <= 0:
@@ -95,6 +98,17 @@ class RiskManager:
         """Resets the daily halt flag."""
         # This is used by the command handler to resume trading
         pass
+
+    def update_loss_streak(self, outcome):
+        """Tracks consecutive losses for the Smart Kill Switch."""
+        if outcome == "LOSS":
+            self.consecutive_losses += 1
+        else:
+            self.consecutive_losses = 0
+
+    def is_kill_switch_active(self):
+        """Kill switch triggers after 3 consecutive losses."""
+        return self.consecutive_losses >= 3
 
     def check_daily_loss(self, current_pnl, starting_balance):
         """
