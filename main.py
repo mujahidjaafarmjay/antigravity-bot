@@ -108,9 +108,12 @@ class TradingBot:
 
     def _run_optimization(self):
         """Fetches data and runs strategy optimizer and pair ranker (Respects CALIBRATION_MODE)."""
-        # Always fetch data first
-        raw_perf = self.sheets.get_all_performance_data()
-        summary = self.sheets.get_performance_summary(raw_perf)
+        # 1. Fetch data
+        all_perf = self.sheets.get_all_performance_data()
+
+        # 2. Tier 6: Rolling Window Performance (Last 30 trades for adaptation)
+        rolling_perf = all_perf[-30:] if len(all_perf) > 30 else all_perf
+        summary = self.sheets.get_performance_summary(rolling_perf)
 
         if config.CALIBRATION_MODE:
             logger.info("Bot in CALIBRATION MODE. Tier 2 Engine (Optimizer/Ranker) suspended.")
@@ -223,9 +226,10 @@ class TradingBot:
                         time.sleep(3600) # Check every hour
                         continue
 
-                # 1.5 Fetch Performance Snapshot for this iteration (reduces API calls)
-                raw_perf = self.sheets.get_all_performance_data()
-                perf_summary = self.sheets.get_performance_summary(raw_perf)
+                # 1.5 Fetch Performance Snapshot (Tier 6 Rolling Window)
+                all_perf = self.sheets.get_all_performance_data()
+                rolling_perf = all_perf[-30:] if len(all_perf) > 30 else all_perf
+                perf_summary = self.sheets.get_performance_summary(rolling_perf)
 
                 # Tier 4 Market Toxicity Check
                 if self.risk.is_market_toxic(perf_summary):

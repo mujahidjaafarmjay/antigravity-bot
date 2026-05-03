@@ -61,8 +61,9 @@ class PairRanker:
         return 1.0
 
     def should_skip_symbol(self, symbol):
-        """Hard filter for toxic symbols."""
+        """Hard filter for toxic symbols (Tier 6: Skip any negative expectancy)."""
         if symbol in self.symbol_performance:
-            if self.symbol_performance[symbol] < -5.0: # Deeply negative expectancy
+            # If we have 5+ trades and expectancy is negative, it's a toxic pair for our strategy
+            if self.symbol_performance[symbol] <= 0:
                 return True
         return False

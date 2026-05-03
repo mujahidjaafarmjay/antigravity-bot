@@ -23,11 +23,14 @@ class RiskManager:
             stats = performance_summary[score]
             if stats['trades'] >= 10: # Lowered threshold for Tier 5 adaptation
                 exp = stats['expectancy']
-                # Adaptive multiplier based on expectancy (Edge)
-                if exp <= 0: return 0.0 # Disable risk for losing signals
+                pf = stats.get('profit_factor', 1.0)
 
-                # Weight = 1.0 + Expectancy (capped at 1.5x)
-                return min(1.5, 1.0 + exp)
+                # Adaptive multiplier based on expectancy (Edge)
+                # Hard Tier 6 Check: Profit Factor must be >= 1.1 to be considered stable
+                if exp <= 0 or pf < 1.1: return 0.0 # Disable risk for losing/unstable signals
+
+                # Weight = 1.0 + Expectancy (capped at 1.2x for safety on small account)
+                return min(1.2, 1.0 + exp)
 
         # 2. Fallback to Static Strategic Weights
         weights = {
