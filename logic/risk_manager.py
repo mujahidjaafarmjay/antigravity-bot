@@ -104,9 +104,9 @@ class RiskManager:
             return False, "Invalid SL/Entry"
             
         rr = reward / risk
-        # Hard Tier 3 Filter: Min RR must be 2.0 or better
+        # Hard Tier 3 Filter: Min RR enforced (default 1.8)
         # Added a 0.01 epsilon to handle floating-point precision issues
-        min_rr = max(2.0, config.REWARD_TO_RISK_RATIO)
+        min_rr = config.REWARD_TO_RISK_RATIO
         if rr < (min_rr - 0.01):
             return False, f"RR too low ({rr:.2f} < {min_rr})"
 
@@ -209,12 +209,22 @@ class RiskManager:
 
     def check_daily_loss(self, current_pnl, starting_balance):
         """
-        Checks if the daily loss limit has been hit.
+        Checks if the daily loss limit (USDT or Percentage) has been hit.
         """
-        if starting_balance <= 0:
+        try:
+            if current_pnl >= 0:
+                return False
+
+            # 1. Hard USDT Limit
+            if abs(current_pnl) >= config.MAX_DAILY_LOSS_USDT:
+                return True
+
+            # 2. Percentage Limit
+            if starting_balance > 0:
+                loss_percent = (abs(current_pnl) / starting_balance) * 100
+                if loss_percent >= self.daily_loss_limit:
+                    return True
+
             return False
-            
-        loss_percent = (abs(current_pnl) / starting_balance) * 100
-        if current_pnl < 0 and loss_percent >= self.daily_loss_limit:
-            return True
-        return False
+        except Exception:
+            return False

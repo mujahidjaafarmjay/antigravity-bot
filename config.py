@@ -46,7 +46,7 @@ HALAL_PAIRS = [
 # Risk per trade is dynamic (calculated in risk_manager.py)
 MAX_OPEN_TRADES            = int(os.environ.get("MAX_OPEN_TRADES", "1")) # Capped to 1 for $40
 DAILY_LOSS_LIMIT_PERCENT   = float(os.environ.get("DAILY_LOSS_LIMIT", "5.0"))
-REWARD_TO_RISK_RATIO       = 2.2  # Gross RR to cover fees (1:2.0 net)
+REWARD_TO_RISK_RATIO       = 1.8  # Relaxed RR to increase trade frequency
 MAX_POSITION_SIZE_PERCENT  = 40.0 # Max 40% of balance per trade
 MAX_POSITION_SIZE_USDT     = 8.0  # Cap at $8 for $40 survival
 MIN_TRADE_USDT             = 6.0  # Bybit minimum is ~$5, we use $6 for safety
@@ -66,7 +66,7 @@ TEST_MODE_THRESHOLD = 3
 # ── Execution ────────────────────────────────────────────────
 TIMEFRAME = "60" # 1H Timeframe
 COOLDOWN_MINUTES = 30
-SPREAD_LIMIT = 0.0015 # 0.15% (Tighter spread for small accounts)
+SPREAD_LIMIT = 0.0025 # 0.25% (Slightly relaxed for better fill rate)
 API_DELAY = 0.4 # 0.3-0.5s delay
 RETRY_ATTEMPTS = 3
 BALANCE_CACHE_SECONDS = 30

@@ -45,6 +45,7 @@ class TradingBot:
         self.telegram = TelegramSender()
         self.cmd_handler = TelegramCommandHandler(self.telegram, self.bybit, self.sheets, self.risk)
         
+        self.utc = pytz.UTC
         self.cooldowns = {}
         self.daily_pnl = 0.0
         self.is_halted = False
@@ -178,8 +179,8 @@ class TradingBot:
                     # Remove from local memory
                     del self.active_trades[symbol]
 
-                    # Set mandatory cooldown to prevent immediate re-entry
-                    self.cooldowns[symbol] = datetime.now() + timedelta(minutes=config.COOLDOWN_MINUTES)
+                    # Set mandatory cooldown (Timezone Aware)
+                    self.cooldowns[symbol] = datetime.now(self.utc) + timedelta(minutes=config.COOLDOWN_MINUTES)
 
                     # Trigger Optimization periodically (every 10 trades)
                     self.closed_trades_count += 1
@@ -224,15 +225,11 @@ class TradingBot:
                     time.sleep(config.BALANCE_CACHE_SECONDS)
                     continue
 
-                # Check Daily Loss (Percentage and Hard USDT limit)
-                is_perc_loss = self.risk.check_daily_loss(self.daily_pnl, self.starting_balance)
-                is_usdt_loss = self.daily_pnl <= -config.MAX_DAILY_LOSS_USDT
-
-                if is_perc_loss or is_usdt_loss:
+                # Check Daily Loss (Hard USDT limit or Percentage)
+                if self.risk.check_daily_loss(self.daily_pnl, self.starting_balance):
                     self.is_halted = True
                     self.sheets.update_meta(self.daily_pnl, self.is_halted)
-                    reason = "Percentage Limit" if is_perc_loss else f"USDT Limit (${config.MAX_DAILY_LOSS_USDT})"
-                    self.telegram.alert_critical(f"Daily loss limit reached ({reason}). Trading halted.")
+                    self.telegram.alert_critical(f"Daily loss limit reached (${self.daily_pnl:.2f}). Trading halted.")
                     continue
 
                 # 2. Monitor Active Trades (TP/SL)
@@ -253,10 +250,13 @@ class TradingBot:
                     if symbol in self.active_trades:
                         continue
 
-                    # Check Cooldown
+                    # 1. Strict Timezone-Aware Cooldown Check
+                    now = datetime.now(self.utc)
                     if symbol in self.cooldowns:
-                        if datetime.now() < self.cooldowns[symbol]:
+                        if now < self.cooldowns[symbol]:
                             continue
+                        else:
+                            del self.cooldowns[symbol]
                             
                     # Prevent re-attempting same trade too frequently
                     if symbol in self.execution_lock:
@@ -304,6 +304,8 @@ class TradingBot:
                         
                         if not valid:
                             logger.warning(f"⚠️ Trade Validation Failed for {symbol}: {reason}")
+                            # Apply short cooldown for blocked trades to avoid log spam
+                            self.cooldowns[symbol] = now + timedelta(minutes=5)
                             self.telegram.send_message(f"⚠️ <b>Trade Blocked: {symbol}</b>\nReason: {reason}")
                             continue
 
@@ -408,8 +410,8 @@ class TradingBot:
                                     trade_log['entry'] = result['price']
                                     self.sheets.log_trade(trade_log)
                                     
-                                    # Set final cooldown
-                                    self.cooldowns[symbol] = datetime.now() + timedelta(minutes=config.COOLDOWN_MINUTES)
+                                    # Set final cooldown (Timezone Aware)
+                                    self.cooldowns[symbol] = datetime.now(self.utc) + timedelta(minutes=config.COOLDOWN_MINUTES)
                                 else:
                                     # ❌ FAILURE
                                     err_msg = result["error"]
