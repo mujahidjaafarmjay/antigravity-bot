@@ -46,7 +46,8 @@ class StrategyOptimizer:
         return self.disabled_scores
 
     def is_score_allowed(self, score):
-        """Checks if a score level is currently allowed by the optimizer."""
+        """Checks if a score level is currently allowed by the optimizer (Always allow 4+ during calibration)."""
+        if score >= 4: return True
         return score not in self.disabled_scores
 
     def get_optimization_report(self):

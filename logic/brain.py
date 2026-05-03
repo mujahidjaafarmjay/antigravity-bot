@@ -130,6 +130,7 @@ class Brain:
             "entry": current_price,
             "stop_loss": stop_loss,
             "take_profit": take_profit,
+            "atr": atr,
             "reason": " | ".join(reasons) if reasons else "Trend OK, but no extra signals",
             "sharia_status": "Verified"
         }

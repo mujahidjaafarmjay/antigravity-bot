@@ -13,27 +13,33 @@ class RiskManager:
         self.consecutive_losses = 0
         self.kill_switch_time = None
 
+    def get_score_weight(self, score):
+        """Dynamic weight based on signal score."""
+        weights = {
+            3: 0.5,
+            4: 1.0,
+            5: 1.2,
+            6: 1.5
+        }
+        return weights.get(score, 1.0)
+
     def calculate_position(self, balance, entry_price, stop_loss, score=3, symbol_weight=1.0):
         """
-        Calculates the quantity based on dynamic risk rules, score confluence, and symbol rank.
+        Calculates the quantity based on dynamic risk rules, score weight, and symbol rank.
         """
         if balance <= 0:
             return 0, "Invalid Balance"
 
         # 1. Base Risk per Trade
-        risk_percent = 0.02 # Default 2%
+        risk_percent = 0.03 # Calibration baseline 3%
         if balance < 30:
-            risk_percent = 0.01 # 1% for very small accounts
+            risk_percent = 0.015 # 1.5% for small balance
 
-        # 2. Score-Based Risk Scaling (Confluence Boost)
-        # Score 3: 100% of base risk
-        # Score 4: 110%
-        # Score 5: 120%
-        # Score 6+: 130%
-        confluence_mult = 1.0 + (max(0, score - 3) * 0.1)
+        # 2. Score-Based Risk Weighting
+        score_mult = self.get_score_weight(score)
 
         # 3. Symbol-Based Weight (from PairRanker)
-        final_risk_percent = risk_percent * confluence_mult * symbol_weight
+        final_risk_percent = risk_percent * score_mult * symbol_weight
         
         risk_amount = balance * final_risk_percent
         
@@ -158,14 +164,6 @@ class RiskManager:
         if not performance_summary:
             return False
 
-        total_wins = 0
-        total_losses = 0
-        trades_counted = 0
-
-        # We need recent global performance, not just per-score
-        # (Assuming summary passed is already relevant or global stats are accessible)
-        # For simplicity, we check if global Profit Factor < EQUITY_PROTECT_THRESHOLD
-
         all_wins = sum(s['gross_win_pnl'] for s in performance_summary.values())
         all_losses = sum(s['gross_loss_pnl'] for s in performance_summary.values())
 
@@ -173,6 +171,24 @@ class RiskManager:
             pf = all_wins / all_losses
             if pf < config.EQUITY_PROTECT_THRESHOLD:
                 return True
+        return False
+
+    def is_market_toxic(self, performance_summary):
+        """
+        Bad Market Filter:
+        Detects if total expectancy of the bot across all signals is deeply negative.
+        """
+        if not performance_summary:
+            return False
+
+        total_trades = sum(s['trades'] for s in performance_summary.values())
+        if total_trades < 10:
+            return False
+
+        total_exp = sum(s['expectancy'] for s in performance_summary.values()) / len(performance_summary)
+
+        if total_exp < -2.0: # Deeply losing baseline
+            return True
         return False
 
     def check_daily_loss(self, current_pnl, starting_balance):

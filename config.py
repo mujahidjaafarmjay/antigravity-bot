@@ -58,7 +58,8 @@ OB_WINDOW  = 10  # Lookback for Order Blocks
 FVG_WINDOW = 3   # Lookback for Fair Value Gaps
 VOL_MULTIPLIER = 1.2
 VOL_WINDOW     = 20
-SCORE_THRESHOLD = 4 # Tighter threshold for $40 capital (Ignore Score 3)
+SCORE_THRESHOLD = 4
+MIN_SCORE_TO_TRADE = 3 # During Calibration, we log Score 3 but track separately
 TEST_MODE_THRESHOLD = 3
 
 # ── Execution ────────────────────────────────────────────────

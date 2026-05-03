@@ -56,18 +56,20 @@ class SheetsPersistence:
             try:
                 self.perf_tab = self.sheet.worksheet("Performance")
             except gspread.WorksheetNotFound:
-                self.perf_tab = self.sheet.add_worksheet("Performance", rows=2000, cols=10)
+                self.perf_tab = self.sheet.add_worksheet("Performance", rows=2000, cols=15)
                 self.perf_tab.append_row([
-                    "Timestamp", "Symbol", "Score", "Entry", "SL", "TP", "Outcome", "PnL", "Fees", "Mode"
+                    "Timestamp", "Symbol", "Score", "RR", "Risk_USDT", "Entry", "SL", "TP",
+                    "Outcome", "PnL", "Fees", "Duration_Mins", "Session", "ATR_Perc", "Mode"
                 ])
 
             # Active Trades Tab (for recovery)
             try:
                 self.active_tab = self.sheet.worksheet("ActiveTrades")
             except gspread.WorksheetNotFound:
-                self.active_tab = self.sheet.add_worksheet("ActiveTrades", rows=100, cols=8)
+                self.active_tab = self.sheet.add_worksheet("ActiveTrades", rows=100, cols=12)
                 self.active_tab.append_row([
-                    "Symbol", "Score", "Entry", "SL", "TP", "Qty", "Mode", "Timestamp"
+                    "Symbol", "Score", "RR", "Risk_USDT", "Entry", "SL", "TP", "Qty",
+                    "Session", "ATR_Perc", "Mode", "Timestamp"
                 ])
 
             # BotMeta Tab
@@ -103,38 +105,56 @@ class SheetsPersistence:
         except Exception as e:
             self.logger.error(f"Error logging trade to Sheets: {e}")
 
-    def log_outcome(self, symbol, score, entry, sl, tp, outcome, pnl, fees, mode):
-        """Logs a finished trade outcome to the 'Performance' tab."""
+    def log_outcome(self, trade, outcome, pnl, fees):
+        """Logs a finished trade outcome with high-fidelity metrics."""
         if not self.perf_tab: return
         try:
+            # Calculate duration
+            duration = ""
+            if 'timestamp' in trade:
+                try:
+                    start_time = datetime.strptime(trade['timestamp'], "%Y-%m-%d %H:%M:%S")
+                    mins = int((datetime.now() - start_time).total_seconds() / 60)
+                    duration = mins
+                except: pass
+
             self.perf_tab.append_row([
                 datetime.now().strftime("%Y-%m-%d %H:%M:%S"),
-                symbol,
-                score,
-                entry,
-                sl,
-                tp,
+                trade['symbol'],
+                trade['score'],
+                trade.get('rr', 0),
+                trade.get('risk_usdt', 0),
+                trade['entry'],
+                trade['stop_loss'],
+                trade['take_profit'],
                 outcome,
                 pnl,
                 fees,
-                mode
+                duration,
+                trade.get('session', ''),
+                trade.get('atr_perc', 0),
+                config.MODE
             ])
             # Also remove from ActiveTrades
-            self.remove_active_trade(symbol)
+            self.remove_active_trade(trade['symbol'])
         except Exception as e:
             self.logger.error(f"Error logging outcome to Sheets: {e}")
 
     def add_active_trade(self, trade):
-        """Adds a trade to the ActiveTrades tab."""
+        """Adds a trade to the ActiveTrades tab with extra metadata."""
         if not self.active_tab: return
         try:
             self.active_tab.append_row([
                 trade['symbol'],
                 trade['score'],
+                trade.get('rr', 0),
+                trade.get('risk_usdt', 0),
                 trade['entry'],
                 trade['stop_loss'],
                 trade['take_profit'],
                 trade['qty'],
+                trade.get('session', ''),
+                trade.get('atr_perc', 0),
                 config.MODE,
                 datetime.now().strftime("%Y-%m-%d %H:%M:%S")
             ])
@@ -155,7 +175,7 @@ class SheetsPersistence:
             self.logger.error(f"Error removing active trade from Sheets: {e}")
 
     def get_active_trades(self):
-        """Recovers active trades from Sheets."""
+        """Recovers active trades from Sheets with all metadata."""
         if not self.active_tab: return {}
         try:
             records = self.active_tab.get_all_records()
@@ -164,11 +184,16 @@ class SheetsPersistence:
                 active[r['Symbol']] = {
                     "symbol": r['Symbol'],
                     "score": r['Score'],
+                    "rr": r.get('RR', 0),
+                    "risk_usdt": r.get('Risk_USDT', 0),
                     "entry": float(r['Entry']),
                     "stop_loss": float(r['SL']),
                     "take_profit": float(r['TP']),
                     "qty": float(r['Qty']),
-                    "mode": r['Mode']
+                    "session": r.get('Session', ''),
+                    "atr_perc": r.get('ATR_Perc', 0),
+                    "mode": r['Mode'],
+                    "timestamp": r.get('Timestamp', '')
                 }
             return active
         except Exception as e:
@@ -201,7 +226,8 @@ class SheetsPersistence:
                 if score not in summary:
                     summary[score] = {
                         "trades": 0, "wins": 0, "losses": 0,
-                        "total_pnl": 0.0, "total_fees": 0.0,
+                        "gross_win_pnl": 0.0, "gross_loss_pnl": 0.0,
+                        "total_fees": 0.0,
                         "win_amounts": [], "loss_amounts": []
                     }
 
@@ -211,14 +237,15 @@ class SheetsPersistence:
                 fees = float(row.get('Fees', 0))
                 outcome = row.get('Outcome')
 
-                s["total_pnl"] += pnl
                 s["total_fees"] += fees
 
                 if outcome == "WIN":
                     s["wins"] += 1
+                    s["gross_win_pnl"] += pnl
                     s["win_amounts"].append(pnl)
                 elif outcome == "LOSS":
                     s["losses"] += 1
+                    s["gross_loss_pnl"] += abs(pnl)
                     s["loss_amounts"].append(abs(pnl))
             except Exception as e:
                 self.logger.error(f"Error processing row for performance summary: {e}")
@@ -230,22 +257,20 @@ class SheetsPersistence:
             win_rate = s["wins"] / s["trades"] if s["trades"] > 0 else 0
 
             # Correct Avg Win/Loss: only use data from corresponding outcomes
-            avg_win = sum(s["win_amounts"]) / len(s["win_amounts"]) if s["win_amounts"] else 0.0
-            avg_loss = sum(s["loss_amounts"]) / len(s["loss_amounts"]) if s["loss_amounts"] else 0.0
+            avg_win = s["gross_win_pnl"] / s["wins"] if s["wins"] > 0 else 0.0
+            avg_loss = s["gross_loss_pnl"] / s["losses"] if s["losses"] > 0 else 0.0
 
             # Expectancy = (WinRate * AvgWin) - (LossRate * AvgLoss)
             expectancy = (win_rate * avg_win) - ((1 - win_rate) * avg_loss)
 
             # Profit Factor = Total Win Amount / Total Loss Amount
-            total_wins = sum(s["win_amounts"])
-            total_losses = sum(s["loss_amounts"])
-            profit_factor = total_wins / total_losses if total_losses > 0 else (float('inf') if total_wins > 0 else 1.0)
+            profit_factor = s["gross_win_pnl"] / s["gross_loss_pnl"] if s["gross_loss_pnl"] > 0 else (float('inf') if s["gross_win_pnl"] > 0 else 1.0)
 
             final_summary[score] = {
                 "score": score,
                 "trades": s["trades"],
                 "win_rate": win_rate,
-                "net_pnl": s["total_pnl"],
+                "net_pnl": s["gross_win_pnl"] - s["gross_loss_pnl"] - s["total_fees"],
                 "expectancy": expectancy,
                 "profit_factor": profit_factor,
                 "avg_win": avg_win,

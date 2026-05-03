@@ -157,18 +157,8 @@ class TradingBot:
                         self.is_halted = True
                         self.telegram.alert_critical("Bot halted by Smart Kill Switch (3 consecutive losses).")
 
-                    # Log to Sheets
-                    self.sheets.log_outcome(
-                        symbol=symbol,
-                        score=trade['score'],
-                        entry=trade['entry'],
-                        sl=trade['stop_loss'],
-                        tp=trade['take_profit'],
-                        outcome=outcome,
-                        pnl=net_pnl,
-                        fees=total_fees,
-                        mode=config.MODE
-                    )
+                    # Log to Sheets with High-Fidelity Data
+                    self.sheets.log_outcome(trade, outcome, net_pnl, total_fees)
 
                     # Notify Telegram
                     emoji = "💰" if outcome == "WIN" else "📉"
@@ -210,6 +200,14 @@ class TradingBot:
                         logger.warning("Bot is currently HALTED (Daily Loss or Kill Switch).")
                         time.sleep(3600) # Check every hour
                         continue
+
+                # Tier 4 Market Toxicity Check
+                perf_summary = self.sheets.get_performance_summary()
+                if self.risk.is_market_toxic(perf_summary):
+                    logger.critical("🚨 MARKET TOXIC: Total expectancy deeply negative. Pausing bot.")
+                    self.telegram.alert_critical("Bot paused: Market conditions are toxic (Negative Expectancy).")
+                    time.sleep(3600 * 4) # Pause for 4 hours
+                    continue
 
                 balance = self.bybit.get_balance()
                 if balance <= 0:
@@ -316,9 +314,21 @@ class TradingBot:
                                 logger.warning(f"PairRanker: Skipping {symbol} due to toxic performance history.")
                                 continue
 
-                            # 5. Calculate Qty with Risk Scaling (Respects CALIBRATION_MODE)
+                            # 5. Calculate Metrics for Logging
+                            rr = abs((decision['take_profit'] - exec_price) / (exec_price - decision['stop_loss']))
+                            atr = decision.get('atr', 0) # We might need Brain to return this
+                            atr_perc = (atr / exec_price) * 100 if atr else 0
+
+                            # Session Labeling
+                            now_hour = datetime.now(pytz.UTC).hour
+                            session = "ASIAN"
+                            if 8 <= now_hour < 13: session = "LONDON"
+                            elif 13 <= now_hour < 17: session = "NY/LONDON"
+                            elif 17 <= now_hour < 21: session = "NY"
+
+                            # 6. Calculate Qty with Risk Scaling (Respects CALIBRATION_MODE)
                             symbol_weight = 1.0 if config.CALIBRATION_MODE else self.ranker.get_symbol_weight(symbol)
-                            score_scaling = 3 if config.CALIBRATION_MODE else decision['score']
+                            score_scaling = decision['score'] # Use real score for weighting
 
                             qty, qty_reason = self.risk.calculate_position(
                                 balance,
@@ -327,6 +337,7 @@ class TradingBot:
                                 score=score_scaling,
                                 symbol_weight=symbol_weight
                             )
+                            risk_usdt = qty * abs(exec_price - decision['stop_loss'])
                             if qty > 0:
                                 # 5. Lock execution BEFORE attempt to prevent race conditions
                                 self.execution_lock[symbol] = datetime.now() + timedelta(minutes=15)
@@ -356,14 +367,19 @@ class TradingBot:
                                         f"ID: {order_id}"
                                     )
                                     
-                                    # Active Trade Tracking
+                                    # Active Trade Tracking with Tier 4 metadata
                                     new_trade = {
                                         "symbol": symbol,
                                         "score": decision['score'],
+                                        "rr": rr,
+                                        "risk_usdt": risk_usdt,
                                         "entry": result['price'],
                                         "stop_loss": decision['stop_loss'],
                                         "take_profit": decision['take_profit'],
-                                        "qty": result['qty']
+                                        "qty": result['qty'],
+                                        "session": session,
+                                        "atr_perc": atr_perc,
+                                        "timestamp": datetime.now().strftime("%Y-%m-%d %H:%M:%S")
                                     }
                                     self.active_trades[symbol] = new_trade
                                     self.sheets.add_active_trade(new_trade)
