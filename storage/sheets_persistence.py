@@ -14,6 +14,8 @@ class SheetsPersistence:
         self.logger = logging.getLogger(__name__)
         self.sheet = None
         self.trades_tab = None
+        self.perf_tab = None
+        self.active_tab = None
         self.meta_tab = None
         self._connect()
 
@@ -210,7 +212,7 @@ class SheetsPersistence:
             return []
 
     def get_performance_summary(self):
-        """Calculates performance metrics grouped by score."""
+        """Calculates performance metrics grouped by score with high-fidelity accumulation."""
         data = self.get_all_performance_data()
         if not data:
             return {}
@@ -263,7 +265,7 @@ class SheetsPersistence:
             # Expectancy = (WinRate * AvgWin) - (LossRate * AvgLoss)
             expectancy = (win_rate * avg_win) - ((1 - win_rate) * avg_loss)
 
-            # Profit Factor = Total Win Amount / Total Loss Amount
+            # Profit Factor = Gross Wins / Gross Losses
             profit_factor = s["gross_win_pnl"] / s["gross_loss_pnl"] if s["gross_loss_pnl"] > 0 else (float('inf') if s["gross_win_pnl"] > 0 else 1.0)
 
             final_summary[score] = {

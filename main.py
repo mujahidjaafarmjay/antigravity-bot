@@ -149,6 +149,7 @@ class TradingBot:
 
                     # Update Daily PnL
                     self.daily_pnl += net_pnl
+                    self.sheets.update_meta(self.daily_pnl, self.is_halted) # Persist immediately
 
                     # Track Loss Streak for Kill Switch
                     self.risk.update_loss_streak(outcome)

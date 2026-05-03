@@ -160,11 +160,13 @@ class BybitHandler:
 
         if is_paper:
             qty_val = self.format_quantity(qty, symbol)
-            self.logger.info(f"[PAPER] Simulating MARKET BUY for {symbol} | Qty: {qty_val}")
+            price_val = self.get_ticker(symbol) or 0.0
+            price_val = self.format_price(price_val, symbol)
+            self.logger.info(f"[PAPER] Simulating MARKET BUY for {symbol} | Qty: {qty_val} | Price: {price_val}")
             return {
                 "success": True,
                 "order_id": f"paper_{int(time.time())}",
-                "price": self.get_ticker(symbol) or 0.0,
+                "price": price_val,
                 "qty": qty_val
             }
 

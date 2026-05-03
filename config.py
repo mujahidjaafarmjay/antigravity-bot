@@ -48,8 +48,9 @@ MAX_OPEN_TRADES            = int(os.environ.get("MAX_OPEN_TRADES", "1")) # Cappe
 DAILY_LOSS_LIMIT_PERCENT   = float(os.environ.get("DAILY_LOSS_LIMIT", "5.0"))
 REWARD_TO_RISK_RATIO       = 2.2  # Gross RR to cover fees (1:2.0 net)
 MAX_POSITION_SIZE_PERCENT  = 40.0 # Max 40% of balance per trade
-MAX_POSITION_SIZE_USDT     = 10.0 # Hard cap for small accounts
+MAX_POSITION_SIZE_USDT     = 8.0  # Cap at $8 for $40 survival
 MIN_TRADE_USDT             = 6.0  # Bybit minimum is ~$5, we use $6 for safety
+RISK_PER_TRADE             = 0.03 # 3% base risk
 
 # ── Strategy Constants ───────────────────────────────────────
 MA_FAST    = 50

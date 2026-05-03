@@ -159,13 +159,13 @@ class RiskManager:
     def is_equity_under_pressure(self, performance_summary):
         """
         Equity Curve Protection:
-        Detects if recent performance (last 20 trades) is below threshold.
+        Detects if recent performance is below threshold using safe key access.
         """
         if not performance_summary:
             return False
 
-        all_wins = sum(s['gross_win_pnl'] for s in performance_summary.values())
-        all_losses = sum(s['gross_loss_pnl'] for s in performance_summary.values())
+        all_wins = sum(s.get('gross_win_pnl', 0) for s in performance_summary.values())
+        all_losses = sum(s.get('gross_loss_pnl', 0) for s in performance_summary.values())
 
         if all_losses > 0:
             pf = all_wins / all_losses
