@@ -249,7 +249,9 @@ class SheetsPersistence:
                 "expectancy": expectancy,
                 "profit_factor": profit_factor,
                 "avg_win": avg_win,
-                "avg_loss": avg_loss
+                "avg_loss": avg_loss,
+                "gross_win_pnl": s["gross_win_pnl"],
+                "gross_loss_pnl": s["gross_loss_pnl"]
             }
 
         return final_summary

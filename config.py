@@ -20,6 +20,13 @@ TRADING_MODE = "live" if MODE == "live" else "paper"
 ENABLE_LIVE_TRADING  = os.environ.get("ENABLE_LIVE_TRADING", "False").lower() == "true"
 CALIBRATION_MODE      = os.environ.get("CALIBRATION_MODE", "True").lower() == "true"
 MAX_DAILY_LOSS_USDT   = float(os.environ.get("MAX_DAILY_LOSS_USDT", "3.0"))
+KILL_SWITCH_COOLDOWN_HOURS = int(os.environ.get("KILL_SWITCH_COOLDOWN", "6"))
+
+# ── Tier 4 Volatility & Equity Protection ────────────────────
+VOLATILITY_LOOKBACK      = 14
+VOLATILITY_LIMIT_MULT    = 2.5 # Skip trade if candle > 2.5x ATR
+EQUITY_PROTECT_TRADES    = 20  # Lookback window for equity protection
+EQUITY_PROTECT_THRESHOLD = 0.8 # PF must be > 0.8 over last window
 
 # ── Google Sheets ─────────────────────────────────────────────
 GOOGLE_SHEETS_CREDENTIALS = os.environ.get("GOOGLE_SHEETS_CREDENTIALS", "").strip()

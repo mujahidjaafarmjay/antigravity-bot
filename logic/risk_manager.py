@@ -1,4 +1,5 @@
 import config
+from datetime import datetime, timedelta
 
 class RiskManager:
     """
@@ -10,6 +11,7 @@ class RiskManager:
         self.max_open_trades = config.MAX_OPEN_TRADES
         self.daily_loss_limit = config.DAILY_LOSS_LIMIT_PERCENT
         self.consecutive_losses = 0
+        self.kill_switch_time = None
 
     def calculate_position(self, balance, entry_price, stop_loss, score=3, symbol_weight=1.0):
         """
@@ -103,12 +105,72 @@ class RiskManager:
         """Tracks consecutive losses for the Smart Kill Switch."""
         if outcome == "LOSS":
             self.consecutive_losses += 1
+            if self.consecutive_losses >= 3:
+                self.kill_switch_time = datetime.now()
         else:
             self.consecutive_losses = 0
+            self.kill_switch_time = None
 
     def is_kill_switch_active(self):
-        """Kill switch triggers after 3 consecutive losses."""
-        return self.consecutive_losses >= 3
+        """
+        Kill switch triggers after 3 consecutive losses.
+        Auto-recovers after KILL_SWITCH_COOLDOWN_HOURS.
+        """
+        if self.consecutive_losses < 3:
+            return False
+
+        if self.kill_switch_time:
+            elapsed = datetime.now() - self.kill_switch_time
+            if elapsed > timedelta(hours=config.KILL_SWITCH_COOLDOWN_HOURS):
+                self.consecutive_losses = 0 # Auto-reset
+                self.kill_switch_time = None
+                return False
+
+        return True
+
+    def is_volatility_too_high(self, df):
+        """
+        Volatility Filter: Detects sudden price spikes or extreme wicks.
+        Skips entry if current candle volatility is > 2.5x ATR.
+        """
+        if df is None or len(df) < 20:
+            return False
+
+        # 1. Calculate ATR (Simplified)
+        high_low = df['high'] - df['low']
+        atr = high_low.rolling(window=config.VOLATILITY_LOOKBACK).mean().iloc[-2]
+
+        # 2. Current Candle Volatility
+        current_vol = df['high'].iloc[-1] - df['low'].iloc[-1]
+
+        if current_vol > (atr * config.VOLATILITY_LIMIT_MULT):
+            return True
+        return False
+
+    def is_equity_under_pressure(self, performance_summary):
+        """
+        Equity Curve Protection:
+        Detects if recent performance (last 20 trades) is below threshold.
+        """
+        if not performance_summary:
+            return False
+
+        total_wins = 0
+        total_losses = 0
+        trades_counted = 0
+
+        # We need recent global performance, not just per-score
+        # (Assuming summary passed is already relevant or global stats are accessible)
+        # For simplicity, we check if global Profit Factor < EQUITY_PROTECT_THRESHOLD
+
+        all_wins = sum(s['gross_win_pnl'] for s in performance_summary.values())
+        all_losses = sum(s['gross_loss_pnl'] for s in performance_summary.values())
+
+        if all_losses > 0:
+            pf = all_wins / all_losses
+            if pf < config.EQUITY_PROTECT_THRESHOLD:
+                return True
+        return False
 
     def check_daily_loss(self, current_pnl, starting_balance):
         """

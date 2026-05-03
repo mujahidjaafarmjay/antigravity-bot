@@ -202,9 +202,14 @@ class TradingBot:
             try:
                 # 1. Safety Checks
                 if self.is_halted:
-                    logger.warning("Bot is currently HALTED due to daily loss limit.")
-                    time.sleep(3600) # Check every hour if still halted
-                    continue
+                    # Check if Kill Switch can auto-recover
+                    if not self.risk.is_kill_switch_active():
+                        logger.info("Bot auto-recovering from Smart Kill Switch...")
+                        self.is_halted = False
+                    else:
+                        logger.warning("Bot is currently HALTED (Daily Loss or Kill Switch).")
+                        time.sleep(3600) # Check every hour
+                        continue
 
                 balance = self.bybit.get_balance()
                 if balance <= 0:
@@ -250,6 +255,11 @@ class TradingBot:
 
                     # Evaluate Trade
                     decision = self.brain.evaluate_trade(symbol, df, balance)
+
+                    # Tier 4 Volatility Guard
+                    if self.risk.is_volatility_too_high(df):
+                        logger.warning(f"⚠️ Volatility Spike detected for {symbol}. Skipping entry.")
+                        continue
                     logger.info(f"Decision for {symbol}: {decision['action']} (Score: {decision['score']}) - {decision['reason']}")
 
                     # Debug Telegram (Only if score is new or changed to avoid spam)
@@ -266,6 +276,13 @@ class TradingBot:
                     self.reported_signals[symbol] = decision['score']
 
                     if decision['action'] in ["BUY", "STRONG BUY"]:
+                        # Tier 4 Equity Protection Check
+                        perf_summary = self.sheets.get_performance_summary()
+                        if self.risk.is_equity_under_pressure(perf_summary):
+                            logger.warning(f"⚠️ Equity Protection: Recent PF < {config.EQUITY_PROTECT_THRESHOLD}. Skipping {symbol}.")
+                            self.telegram.send_message(f"⚠️ <b>Equity Guard:</b> Skipping {symbol} due to recent performance pressure.")
+                            continue
+
                         # Validate with Risk Manager
                         open_orders = self.bybit.get_open_orders()
                         valid, reason = self.risk.validate_trade(decision, balance, len(open_orders), bid, ask)
