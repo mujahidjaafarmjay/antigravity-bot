@@ -211,9 +211,10 @@ class SheetsPersistence:
             self.logger.error(f"Error fetching performance data: {e}")
             return []
 
-    def get_performance_summary(self):
+    def get_performance_summary(self, data=None):
         """Calculates performance metrics grouped by score and global stats."""
-        data = self.get_all_performance_data()
+        if data is None:
+            data = self.get_all_performance_data()
 
         # Initialize summary with global stats container
         summary = {

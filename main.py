@@ -94,15 +94,20 @@ class TradingBot:
 
     def _run_optimization(self):
         """Fetches data and runs strategy optimizer and pair ranker (Respects CALIBRATION_MODE)."""
+        # Always fetch data first
+        raw_perf = self.sheets.get_all_performance_data()
+        summary = self.sheets.get_performance_summary(raw_perf)
+
         if config.CALIBRATION_MODE:
             logger.info("Bot in CALIBRATION MODE. Tier 2 Engine (Optimizer/Ranker) suspended.")
             self.brain.set_disabled_scores(set())
+            # We still run ranker update to track data, but don't apply filters
+            self.ranker.update_rankings(raw_perf)
             return
 
         logger.info("Running Tier 2 Strategy Optimization...")
 
         # 1. Score-Level Optimization
-        summary = self.sheets.get_performance_summary()
         disabled = self.optimizer.analyze_and_optimize(summary)
 
         if disabled:
@@ -113,7 +118,6 @@ class TradingBot:
         self.brain.set_disabled_scores(disabled)
 
         # 2. Symbol-Level Ranking
-        raw_perf = self.sheets.get_all_performance_data()
         self.ranker.update_rankings(raw_perf)
 
     def _monitor_active_trades(self):
@@ -202,8 +206,11 @@ class TradingBot:
                         time.sleep(3600) # Check every hour
                         continue
 
+                # 1.5 Fetch Performance Snapshot for this iteration (reduces API calls)
+                raw_perf = self.sheets.get_all_performance_data()
+                perf_summary = self.sheets.get_performance_summary(raw_perf)
+
                 # Tier 4 Market Toxicity Check
-                perf_summary = self.sheets.get_performance_summary()
                 if self.risk.is_market_toxic(perf_summary):
                     logger.critical("🚨 MARKET TOXIC: Total expectancy deeply negative. Pausing bot.")
                     self.telegram.alert_critical("Bot paused: Market conditions are toxic (Negative Expectancy).")
@@ -230,7 +237,16 @@ class TradingBot:
                 # 2. Monitor Active Trades (TP/SL)
                 self._monitor_active_trades()
 
-                # 3. Iterate through Halal Pairs
+                # 3. Global Market Trend Filter
+                btc_df, _, _ = self.bybit.get_market_data("BTCUSDT")
+                market_trend = self.brain.get_market_trend(btc_df)
+
+                if market_trend != "bullish":
+                    logger.warning(f"Market Trend is {market_trend.upper()}. Skipping trade scanning to preserve capital.")
+                    time.sleep(300) # Sleep for 5 mins
+                    continue
+
+                # 4. Iterate through Halal Pairs
                 for symbol in config.HALAL_PAIRS:
                     # Prevent multiple active trades for same symbol (Duplicate Guard)
                     if symbol in self.active_trades:
@@ -275,8 +291,7 @@ class TradingBot:
                     self.reported_signals[symbol] = decision['score']
 
                     if decision['action'] in ["BUY", "STRONG BUY"]:
-                        # Tier 4 Equity Protection Check
-                        perf_summary = self.sheets.get_performance_summary()
+                        # Tier 4 Equity Protection Check (Uses cached snapshot)
                         if self.risk.is_equity_under_pressure(perf_summary):
                             logger.warning(f"⚠️ Equity Protection: Recent PF < {config.EQUITY_PROTECT_THRESHOLD}. Skipping {symbol}.")
                             self.telegram.send_message(f"⚠️ <b>Equity Guard:</b> Skipping {symbol} due to recent performance pressure.")

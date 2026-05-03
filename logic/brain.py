@@ -22,6 +22,22 @@ class Brain:
         """Checks if the symbol is in the Sharia-compliant whitelist."""
         return symbol in self.halal_pairs
 
+    def get_market_trend(self, btc_df):
+        """
+        Determines the Global Market Trend using BTC as the driver.
+        Returns 'bullish' or 'bearish'.
+        """
+        if btc_df is None or len(btc_df) < config.MA_SLOW:
+            return "unknown"
+
+        btc_df['ma50'] = btc_df['close'].rolling(window=config.MA_FAST).mean()
+        btc_df['ma200'] = btc_df['close'].rolling(window=config.MA_SLOW).mean()
+
+        current_ma50 = btc_df['ma50'].iloc[-2]
+        current_ma200 = btc_df['ma200'].iloc[-2]
+
+        return "bullish" if current_ma50 > current_ma200 else "bearish"
+
     def _is_session_active(self):
         """
         Session Filter: Avoids high-noise/low-liquidity periods.
