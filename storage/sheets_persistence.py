@@ -18,6 +18,7 @@ class SheetsPersistence:
         self.active_tab = None
         self.meta_tab = None
         self.stats_tab = None
+        self.dash_tab = None
         self._connect()
 
     def _connect(self):
@@ -44,7 +45,7 @@ class SheetsPersistence:
             self.logger.error(f"Error connecting to Google Sheets: {e}")
 
     def _setup_tabs(self):
-        """Creates 'Trades', 'Performance', 'ActiveTrades', 'Stats', and 'BotMeta' tabs if they don't exist."""
+        """Creates 'Trades', 'Performance', 'ActiveTrades', 'Stats', 'Dashboard', and 'BotMeta' tabs if they don't exist."""
         try:
             # Trades Tab (Signal Log)
             try:
@@ -82,6 +83,23 @@ class SheetsPersistence:
                 self.stats_tab = self.sheet.add_worksheet("Stats", rows=100, cols=10)
                 self.stats_tab.append_row([
                     "Metric_Type", "Key", "Trades", "WinRate", "NetPnL", "Expectancy", "ProfitFactor", "AvgWin", "AvgLoss", "LastUpdate"
+                ])
+
+            # Dashboard Tab (Executive Summary)
+            try:
+                self.dash_tab = self.sheet.worksheet("Dashboard")
+            except gspread.WorksheetNotFound:
+                self.dash_tab = self.sheet.add_worksheet("Dashboard", rows=50, cols=2)
+                self.dash_tab.update("A1:B10", [
+                    ["Institutional KPI", "Value"],
+                    ["Total Net PnL", "0.0"],
+                    ["Max Drawdown (%)", "0.0"],
+                    ["Recovery Progress (%)", "0.0"],
+                    ["Avg Slippage (bps)", "0.0"],
+                    ["Profit Factor", "0.0"],
+                    ["Real Edge (bps)", "0.0"],
+                    ["Last Scan Time", ""],
+                    ["Bot Status", "RUNNING"]
                 ])
 
             # BotMeta Tab
@@ -222,6 +240,30 @@ class SheetsPersistence:
         except Exception as e:
             self.logger.error(f"Error fetching performance data: {e}")
             return []
+
+    def update_dashboard(self, summary, drawdown, in_recovery):
+        """Updates the Dashboard tab with high-level KPIs."""
+        if not self.dash_tab: return
+        try:
+            g = summary.get("GLOBAL", {})
+            now = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
+
+            # Recovery Progress = (Current / Peak) if in DD
+            # Since we don't have current vs peak here, we just use status
+            status = "RECOVERY MODE" if in_recovery else "GROWTH MODE"
+
+            kpis = [
+                ["Total Net PnL", f"${g.get('net_pnl', 0):.2f}"],
+                ["Max Drawdown (%)", f"{drawdown:.2%}"],
+                ["Avg Slippage (bps)", f"{g.get('avg_slippage', 0)*10000:.1f}"],
+                ["Profit Factor", f"{g.get('profit_factor', 1.0):.2f}"],
+                ["Real Edge (bps)", f"{g.get('real_edge', 0)*10000:.1f}"],
+                ["Last Update", now],
+                ["Bot Status", status]
+            ]
+            self.dash_tab.update("B2:B8", [[k[1]] for k in kpis])
+        except Exception as e:
+            self.logger.error(f"Error updating Dashboard: {e}")
 
     def update_stats_tab(self, summary):
         """Updates the 'Stats' tab with the latest performance summary."""

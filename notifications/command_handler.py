@@ -192,7 +192,7 @@ class TelegramCommandHandler:
                         filters.TEXT & ~filters.COMMAND, self.handle_message
                     )
                 )
-                print("[Telegram] Listener started")
+                print(f"[Telegram] Listener Instance {os.getpid()} starting...")
                 await app.initialize()
                 # Fix Bug: drop_pending_updates=True to avoid Conflict Error
                 await app.bot.delete_webhook(drop_pending_updates=True)

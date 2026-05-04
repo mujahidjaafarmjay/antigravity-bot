@@ -128,8 +128,12 @@ class TradingBot:
 
         logger.info("Running Tier 2 Strategy Optimization...")
 
-        # Update Stats Tab in Sheets for visibility
+        # Update Analytics in Sheets
         self.sheets.update_stats_tab(summary)
+
+        # Dashboard Update
+        drawdown = (self.risk.peak_balance - self.bybit.get_balance()) / self.risk.peak_balance if self.risk.peak_balance > 0 else 0
+        self.sheets.update_dashboard(summary, drawdown, self.risk.in_recovery_mode)
 
         # 1. Score-Level Optimization
         disabled = self.optimizer.analyze_and_optimize(summary)
@@ -445,12 +449,22 @@ class TradingBot:
                                     # ✅ SUCCESS
                                     self.daily_trade_count += 1
                                     order_id = result['order_id']
-                                    logger.info(f"✅ SUCCESS: Trade executed for {symbol} | ID: {order_id}")
+                                    fill_price = result['price']
+
+                                    # Tier 8: Slippage Guard (Bad Fill Detection)
+                                    slippage_perc = abs(fill_price - exec_price) / exec_price
+                                    slip_status = "GOOD"
+                                    if slippage_perc > 0.003: # 0.3%
+                                        slip_status = "BAD_FILL"
+                                        logger.warning(f"⚠️ BAD FILL: {symbol} slippage {slippage_perc:.2%}")
+                                        self.telegram.send_message(f"⚠️ <b>BAD FILL: {symbol}</b>\nSlippage: {slippage_perc:.2%}\nPrice: ${fill_price}")
+
+                                    logger.info(f"✅ SUCCESS: Trade executed for {symbol} | ID: {order_id} | Slip: {slip_status}")
                                     self.telegram.send_message(
                                         f"✅ <b>ORDER PLACED: {symbol}</b>\n"
                                         f"Qty: {result['qty']}\n"
-                                        f"Price: {result['price']}\n"
-                                        f"ID: {order_id}"
+                                        f"Price: {fill_price}\n"
+                                        f"Slip: {slip_status} ({slippage_perc:.2%})"
                                     )
                                     
                                     # Active Trade Tracking with Tier 4 metadata
