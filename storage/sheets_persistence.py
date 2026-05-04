@@ -241,27 +241,27 @@ class SheetsPersistence:
             self.logger.error(f"Error fetching performance data: {e}")
             return []
 
-    def update_dashboard(self, summary, drawdown, in_recovery):
+    def update_dashboard(self, summary, drawdown, in_recovery, balance, peak):
         """Updates the Dashboard tab with high-level KPIs."""
         if not self.dash_tab: return
         try:
             g = summary.get("GLOBAL", {})
             now = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
 
-            # Recovery Progress = (Current / Peak) if in DD
-            # Since we don't have current vs peak here, we just use status
+            recovery_prog = (balance / peak * 100) if peak > 0 and in_recovery else 100.0
             status = "RECOVERY MODE" if in_recovery else "GROWTH MODE"
 
             kpis = [
                 ["Total Net PnL", f"${g.get('net_pnl', 0):.2f}"],
                 ["Max Drawdown (%)", f"{drawdown:.2%}"],
+                ["Recovery Progress (%)", f"{recovery_prog:.1f}%"],
                 ["Avg Slippage (bps)", f"{g.get('avg_slippage', 0)*10000:.1f}"],
                 ["Profit Factor", f"{g.get('profit_factor', 1.0):.2f}"],
                 ["Real Edge (bps)", f"{g.get('real_edge', 0)*10000:.1f}"],
                 ["Last Update", now],
                 ["Bot Status", status]
             ]
-            self.dash_tab.update("B2:B8", [[k[1]] for k in kpis])
+            self.dash_tab.update("B2:B9", [[k[1]] for k in kpis])
         except Exception as e:
             self.logger.error(f"Error updating Dashboard: {e}")
 

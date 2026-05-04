@@ -132,8 +132,9 @@ class TradingBot:
         self.sheets.update_stats_tab(summary)
 
         # Dashboard Update
-        drawdown = (self.risk.peak_balance - self.bybit.get_balance()) / self.risk.peak_balance if self.risk.peak_balance > 0 else 0
-        self.sheets.update_dashboard(summary, drawdown, self.risk.in_recovery_mode)
+        current_bal = self.bybit.get_balance()
+        drawdown = (self.risk.peak_balance - current_bal) / self.risk.peak_balance if self.risk.peak_balance > 0 else 0
+        self.sheets.update_dashboard(summary, drawdown, self.risk.in_recovery_mode, current_bal, self.risk.peak_balance)
 
         # 1. Score-Level Optimization
         disabled = self.optimizer.analyze_and_optimize(summary)
@@ -458,6 +459,15 @@ class TradingBot:
                                         slip_status = "BAD_FILL"
                                         logger.warning(f"⚠️ BAD FILL: {symbol} slippage {slippage_perc:.2%}")
                                         self.telegram.send_message(f"⚠️ <b>BAD FILL: {symbol}</b>\nSlippage: {slippage_perc:.2%}\nPrice: ${fill_price}")
+
+                                    # Tier 8: "Terrible Fill" Emergency Exit
+                                    if slippage_perc > 0.005: # 0.5%
+                                        logger.critical(f"🚨 TERRIBLE FILL: {symbol} slippage {slippage_perc:.2%}. Emergency closing.")
+                                        self.telegram.alert_critical(f"Emergency Exit: {symbol} filled with {slippage_perc:.2%} slippage.")
+                                        # Emergency close with market order
+                                        self.bybit.emergency_market_sell(symbol, result['qty'])
+                                        self.cooldowns[symbol] = now + timedelta(minutes=60)
+                                        continue
 
                                     logger.info(f"✅ SUCCESS: Trade executed for {symbol} | ID: {order_id} | Slip: {slip_status}")
                                     self.telegram.send_message(

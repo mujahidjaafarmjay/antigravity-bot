@@ -69,6 +69,9 @@ class RiskManager:
         drawdown = self.update_peak_balance(balance)
         drawdown_mult = 0.5 if self.in_recovery_mode else 1.0 # Reduce risk by 50% if > 5% drawdown
 
+        # Tier 8: Simple Compounding Factor (1.05x risk if at all-time high)
+        compounding_mult = 1.05 if drawdown <= 0 else 1.0
+
         # 1. Base Risk per Trade
         risk_percent = 0.03 # Calibration baseline 3%
         if balance < 30:
@@ -88,7 +91,7 @@ class RiskManager:
         elif session == "ASIAN": session_mult = 0.7 # Asia is lower volatility/higher noise
 
         # 5. Combined Weighting
-        final_risk_percent = risk_percent * score_mult * symbol_weight * drawdown_mult * spread_mult * session_mult
+        final_risk_percent = risk_percent * score_mult * symbol_weight * drawdown_mult * spread_mult * session_mult * compounding_mult
 
         risk_amount = balance * final_risk_percent
         
