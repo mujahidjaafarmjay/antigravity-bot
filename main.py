@@ -461,14 +461,17 @@ class TradingBot:
                                         logger.warning(f"⚠️ BAD FILL: {symbol} slippage {slippage_perc:.2%}")
                                         self.telegram.send_message(f"⚠️ <b>BAD FILL: {symbol}</b>\nSlippage: {slippage_perc:.2%}\nPrice: ${fill_price}")
 
-                                    # Tier 8: "Terrible Fill" Emergency Exit
+                                    # Tier 8: "Terrible Fill" Emergency Exit (Hardened)
                                     if slippage_perc > 0.005: # 0.5%
-                                        logger.critical(f"🚨 TERRIBLE FILL: {symbol} slippage {slippage_perc:.2%}. Emergency closing.")
-                                        self.telegram.alert_critical(f"Emergency Exit: {symbol} filled with {slippage_perc:.2%} slippage.")
-                                        # Emergency close with market order
-                                        self.bybit.emergency_market_sell(symbol, result['qty'])
-                                        self.cooldowns[symbol] = now + timedelta(minutes=60)
-                                        continue
+                                        # Only emergency close if market conditions are also toxic (wide spread or spike)
+                                        spread_val = (ask - bid) / bid if bid > 0 else 0
+                                        if spread_val > 0.003 or self.risk.is_volatility_too_high(df):
+                                            logger.critical(f"🚨 TERRIBLE FILL: {symbol} slippage {slippage_perc:.2%}. Emergency closing.")
+                                            self.telegram.alert_critical(f"Emergency Exit: {symbol} filled with {slippage_perc:.2%} slippage in toxic conditions.")
+                                            # Emergency close with market order
+                                            self.bybit.emergency_market_sell(symbol, result['qty'])
+                                            self.cooldowns[symbol] = now + timedelta(minutes=60)
+                                            continue
 
                                     logger.info(f"✅ SUCCESS: Trade executed for {symbol} | ID: {order_id} | Slip: {slip_status}")
                                     self.telegram.send_message(

@@ -14,6 +14,7 @@ class RiskManager:
         self.kill_switch_time = None
         self.peak_balance = 0.0
         self.max_trades_per_day = 5
+        self.recovery_exit_time = None # Tier 8: Stability filter for recovery
 
     def get_score_weight(self, score, performance_summary=None):
         """
@@ -49,12 +50,35 @@ class RiskManager:
         return weights.get(score, 1.0)
 
     def update_peak_balance(self, balance):
-        """Updates peak balance and checks for recovery mode."""
+        """
+        Updates peak balance and checks for recovery mode.
+        Tier 8: Includes 24h stability filter before exiting recovery.
+        """
         if balance > self.peak_balance:
             self.peak_balance = balance
 
         drawdown = (self.peak_balance - balance) / self.peak_balance if self.peak_balance > 0 else 0
-        self.in_recovery_mode = drawdown >= 0.05
+
+        # 1. Check current drawdown
+        is_currently_in_dd = drawdown >= 0.05
+
+        # 2. Track when drawdown ends
+        if is_currently_in_dd:
+            self.recovery_exit_time = None # Reset if we are currently deep in DD
+        elif not is_currently_in_dd and self.recovery_exit_time is None:
+            # We just recovered from DD
+            self.recovery_exit_time = datetime.now()
+
+        # 3. Decision Logic: Stay in recovery if DD > 5% OR if 24h stability period not met
+        stability_check_passed = True
+        if self.recovery_exit_time:
+            elapsed = (datetime.now() - self.recovery_exit_time).total_seconds() / 3600
+            if elapsed < 24: # 24 hour stability filter
+                stability_check_passed = False
+
+        # In recovery if DD is high OR we are still in the 24h cooling off period
+        self.in_recovery_mode = is_currently_in_dd or (not stability_check_passed)
+
         return drawdown
 
     def calculate_position(self, balance, entry_price, stop_loss, score=3, symbol_weight=1.0, performance_summary=None, spread=0, session="ASIAN"):
@@ -69,8 +93,8 @@ class RiskManager:
         drawdown = self.update_peak_balance(balance)
         drawdown_mult = 0.5 if self.in_recovery_mode else 1.0 # Reduce risk by 50% if > 5% drawdown
 
-        # Tier 8: Simple Compounding Factor (1.05x risk if at all-time high)
-        compounding_mult = 1.05 if drawdown <= 0 else 1.0
+        # Tier 8: Simple Compounding Factor (1.01x risk if at all-time high)
+        compounding_mult = 1.01 if drawdown <= 0 else 1.0
 
         # 1. Base Risk per Trade
         risk_percent = 0.03 # Calibration baseline 3%
@@ -90,8 +114,11 @@ class RiskManager:
         if session == "LONDON": session_mult = 1.2 # London is high conviction
         elif session == "ASIAN": session_mult = 0.7 # Asia is lower volatility/higher noise
 
-        # 5. Combined Weighting
-        final_risk_percent = risk_percent * score_mult * symbol_weight * drawdown_mult * spread_mult * session_mult * compounding_mult
+        # 5. Combined Weighting (Capped at 1.2x for account safety)
+        combined_mult = score_mult * symbol_weight * drawdown_mult * spread_mult * session_mult * compounding_mult
+        combined_mult = min(1.2, combined_mult)
+
+        final_risk_percent = risk_percent * combined_mult
 
         risk_amount = balance * final_risk_percent
         
@@ -237,8 +264,8 @@ class RiskManager:
 
     def is_market_toxic(self, performance_summary):
         """
-        Bad Market Filter:
-        Detects if recent global Profit Factor is below critical threshold.
+        Bad Market Filter (Tier 8 Upgrade):
+        Detects if recent global Profit Factor or Real Edge is below critical threshold.
         """
         if not performance_summary or "GLOBAL" not in performance_summary:
             return False
@@ -247,10 +274,17 @@ class RiskManager:
         if g['trades'] < 10:
             return False
 
+        # 1. Profit Factor Check
         if g['gross_loss_pnl'] > 0:
             pf = g['gross_win_pnl'] / g['gross_loss_pnl']
             if pf < 0.8: # Market is toxic if we're losing > 20% more than we win
                 return True
+
+        # 2. Real Edge Circuit Breaker
+        real_edge = g.get('real_edge', 0)
+        if real_edge < -0.001: # Circuit break if real net edge is negative (after fees/slip)
+            return True
+
         return False
 
     def check_daily_loss(self, current_pnl, starting_balance):

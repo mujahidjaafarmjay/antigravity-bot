@@ -271,6 +271,7 @@ class SheetsPersistence:
             recovery_prog = (balance / peak * 100) if peak > 0 and in_recovery else 100.0
             status = "RECOVERY MODE" if in_recovery else "GROWTH MODE"
 
+            # Basis points (bps) = % * 10000
             kpis = [
                 ["Total Net PnL", f"${g.get('net_pnl', 0):.2f}"],
                 ["Max Drawdown (%)", f"{drawdown:.2%}"],
@@ -279,9 +280,10 @@ class SheetsPersistence:
                 ["Profit Factor", f"{g.get('profit_factor', 1.0):.2f}"],
                 ["Real Edge (bps)", f"{g.get('real_edge', 0)*10000:.1f}"],
                 ["Last Update", now],
-                ["Bot Status", status]
+                ["Bot Status", status],
+                ["Compounding Mult", "1.01x" if balance >= peak else "1.00x"]
             ]
-            self.dash_tab.update("B2:B9", [[k[1]] for k in kpis])
+            self.dash_tab.update("B2:B10", [[k[1]] for k in kpis])
         except Exception as e:
             self.logger.error(f"Error updating Dashboard: {e}")
 
