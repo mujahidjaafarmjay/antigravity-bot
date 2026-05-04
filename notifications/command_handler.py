@@ -140,6 +140,9 @@ class TelegramCommandHandler:
             parse_mode="HTML",
         )
 
+    async def ping(self, update: Update, context: ContextTypes.DEFAULT_TYPE):
+        await update.message.reply_text("🏓 <b>PONG</b> - Bot is responsive!", parse_mode="HTML")
+
     async def help_cmd(self, update: Update, context: ContextTypes.DEFAULT_TYPE):
         await update.message.reply_text(
             "❓ <b>Commands</b>\n\n"
@@ -178,6 +181,10 @@ class TelegramCommandHandler:
 
     async def run_listener(self):
         """Telegram polling with clean shutdown on retry."""
+        if not config.TELEGRAM_TOKEN:
+            print("[Telegram] CRITICAL: No token provided. Listener aborted.")
+            return
+
         app = None
         while True:
             try:
@@ -186,6 +193,7 @@ class TelegramCommandHandler:
                 app.add_handler(CommandHandler("status", self.status))
                 app.add_handler(CommandHandler("pause",  self.pause))
                 app.add_handler(CommandHandler("resume", self.resume))
+                app.add_handler(CommandHandler("ping",    self.ping))
                 app.add_handler(CommandHandler("help",   self.help_cmd))
                 app.add_handler(
                     MessageHandler(
