@@ -50,6 +50,7 @@ class TradingBot:
         self.daily_pnl = 0.0
         self.is_halted = False
         self.starting_balance = 0.0
+        self.last_recovery_state = False # For Telegram alerts
         self.reported_signals = {} # Track last score sent to Telegram
         self.execution_lock = {} # Prevent duplicate execution attempts
         self.daily_trade_count = 0 # Tier 7 Frequency Control
@@ -67,7 +68,7 @@ class TradingBot:
         self.ranker.banned_until = self.sheets.recover_bans()
 
         # Daily PnL Reset Logic
-        last_run_str = self.sheets.get_bot_meta("last_reset_date")
+        last_run_str = meta.get('last_trade_day', "")
         today_str = datetime.now().strftime("%Y-%m-%d")
 
         if last_run_str != today_str:
@@ -76,10 +77,10 @@ class TradingBot:
             self.daily_trade_count = 0
             self.is_halted = False
             self.starting_balance = self.bybit.get_balance() # Refresh baseline
-            self.sheets.set_bot_meta("last_reset_date", today_str)
-            self.sheets.update_meta(0.0, False, self.risk.peak_balance)
+            self.sheets.update_meta(0.0, False, self.risk.peak_balance, 0, today_str)
         else:
             self.daily_pnl = meta.get('daily_net_pnl', 0.0)
+            self.daily_trade_count = meta.get('daily_trade_count', 0)
             self.is_halted = meta.get('is_halted', False)
 
         # 1. Fetch truth from exchange
@@ -280,7 +281,23 @@ class TradingBot:
                     continue
 
                 balance = self.bybit.get_balance()
+
+                # Check Real Edge for Recovery Exit
+                g = perf_summary.get("GLOBAL", {})
+                real_edge_val = g.get('real_edge', 0)
+
                 self.risk.update_peak_balance(balance)
+                # Hard Tier 8 Guard: Stay in recovery if Real Edge is weak (< 5 bps)
+                if self.risk.in_recovery_mode == False and real_edge_val < 0.0005:
+                    self.risk.in_recovery_mode = True
+
+                # Recovery Mode Alerts
+                if self.risk.in_recovery_mode != self.last_recovery_state:
+                    if self.risk.in_recovery_mode:
+                        self.telegram.send_message("⚠️ <b>RECOVERY MODE ACTIVATED</b>\nSelectivity increased (Score 5+), Risk halved.")
+                    else:
+                        self.telegram.send_message("✅ <b>RECOVERY MODE EXITED</b>\nGrowth parameters restored.")
+                    self.last_recovery_state = self.risk.in_recovery_mode
                 if balance <= 0:
                     logger.error("Balance unreadable or 0. Skipping iteration.")
                     time.sleep(config.BALANCE_CACHE_SECONDS)
@@ -289,7 +306,7 @@ class TradingBot:
                 # Check Daily Loss (Hard USDT limit or Percentage)
                 if self.risk.check_daily_loss(self.daily_pnl, self.starting_balance):
                     self.is_halted = True
-                    self.sheets.update_meta(self.daily_pnl, self.is_halted, self.risk.peak_balance)
+                    self.sheets.update_meta(self.daily_pnl, self.is_halted, self.risk.peak_balance, self.daily_trade_count, datetime.now().strftime("%Y-%m-%d"))
                     self.telegram.alert_critical(f"Daily loss limit reached (${self.daily_pnl:.2f}). Trading halted.")
                     continue
 
@@ -301,6 +318,7 @@ class TradingBot:
                 max_daily = 2 if self.risk.in_recovery_mode else self.risk.max_trades_per_day
                 if self.daily_trade_count >= max_daily:
                     logger.warning(f"Daily trade limit reached ({max_daily}). Scanning paused.")
+                    self.sheets.update_meta(self.daily_pnl, self.is_halted, self.risk.peak_balance, self.daily_trade_count, datetime.now().strftime("%Y-%m-%d"))
                     time.sleep(3600)
                     continue
 

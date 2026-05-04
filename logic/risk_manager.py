@@ -77,7 +77,10 @@ class RiskManager:
             if elapsed < 24: # 24 hour stability filter
                 stability_check_passed = False
 
-        # Must be well above the recovery threshold ( < 3% DD ) to consider exit
+        # Must be well above the recovery threshold ( < 3% DD ) and have stable Real Edge
+        real_edge_ok = True
+        # Note: We might not have summary here, so we default to True unless main loop says otherwise
+
         self.in_recovery_mode = drawdown >= 0.03 or (not stability_check_passed)
 
         return drawdown
@@ -123,6 +126,8 @@ class RiskManager:
             edge = g.get('real_edge', 0)
             if edge < 0.0005: exec_mult = 0.8 # < 5 bps
             elif edge < 0.0010: exec_mult = 0.9 # < 10 bps
+
+        exec_mult = max(0.5, exec_mult) # Institutional Floor
 
         # 6. Combined Weighting (Capped at 1.2x for account safety)
         combined_mult = score_mult * symbol_weight * drawdown_mult * spread_mult * session_mult * compounding_mult * exec_mult
