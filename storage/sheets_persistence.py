@@ -51,19 +51,21 @@ class SheetsPersistence:
             try:
                 self.trades_tab = self.sheet.worksheet("Trades")
             except gspread.WorksheetNotFound:
-                self.trades_tab = self.sheet.add_worksheet("Trades", rows=1000, cols=10)
+                self.trades_tab = self.sheet.add_worksheet("Trades", rows=2000, cols=20)
                 self.trades_tab.append_row([
-                    "Timestamp", "Symbol", "Action", "Score", "Entry", "SL", "TP", "Qty", "Reason", "Sharia_Status"
+                    "Timestamp", "Symbol", "Score", "Entry", "Exit", "SL", "TP", "Qty",
+                    "RR", "Risk_USDT", "Gross_PnL", "Fees", "Net_PnL", "Slippage",
+                    "Session", "ATR_Perc", "Duration_Mins", "Outcome", "Reason", "Mode"
                 ])
 
-            # Performance Tab (Outcome Log)
+            # Performance Tab (Alias for historical reasons, now mirroring Dashboard/Stats logic)
             try:
                 self.perf_tab = self.sheet.worksheet("Performance")
             except gspread.WorksheetNotFound:
-                self.perf_tab = self.sheet.add_worksheet("Performance", rows=2000, cols=15)
+                self.perf_tab = self.sheet.add_worksheet("Performance", rows=2000, cols=20)
                 self.perf_tab.append_row([
                     "Timestamp", "Symbol", "Score", "RR", "Risk_USDT", "Entry", "SL", "TP",
-                "Outcome", "PnL", "Fees", "Duration_Mins", "Session", "ATR_Perc", "Slippage", "Mode"
+                    "Outcome", "PnL", "Fees", "Duration_Mins", "Session", "ATR_Perc", "Slippage", "Mode"
                 ])
 
             # Active Trades Tab (for recovery)
@@ -137,8 +139,7 @@ class SheetsPersistence:
             self.logger.error(f"Error logging trade to Sheets: {e}")
 
     def log_outcome(self, trade, outcome, pnl, fees, slippage=0.0):
-        """Logs a finished trade outcome with high-fidelity metrics."""
-        if not self.perf_tab: return
+        """Logs a finished trade outcome with high-fidelity metrics to both Performance and Trades tabs."""
         try:
             # Calculate duration
             duration = ""
@@ -149,7 +150,7 @@ class SheetsPersistence:
                     duration = mins
                 except: pass
 
-            self.perf_tab.append_row([
+            row_data = [
                 datetime.now().strftime("%Y-%m-%d %H:%M:%S"),
                 trade['symbol'],
                 trade['score'],
@@ -166,7 +167,26 @@ class SheetsPersistence:
                 trade.get('atr_perc', 0),
                 f"{slippage:.4f}",
                 config.MODE
-            ])
+            ]
+
+            # 1. Log to Performance (Institutional Outcome Log)
+            if self.perf_tab:
+                self.perf_tab.append_row(row_data)
+
+            # 2. Log to Trades (Full Single-Source Log)
+            if self.trades_tab:
+                # Mirroring the 20-column header:
+                # Timestamp, Symbol, Score, Entry, Exit, SL, TP, Qty, RR, Risk_USDT, Gross_PnL, Fees, Net_PnL, Slippage, Session, ATR_Perc, Duration, Outcome, Reason, Mode
+                full_row = [
+                    row_data[0], trade['symbol'], trade['score'], trade['entry'],
+                    trade.get('exit_price', trade['entry']), trade['stop_loss'], trade['take_profit'],
+                    trade.get('qty', 0), trade.get('rr', 0), trade.get('risk_usdt', 0),
+                    pnl + fees, fees, pnl, f"{slippage:.4f}",
+                    trade.get('session', ''), trade.get('atr_perc', 0), duration, outcome,
+                    trade.get('reason', ''), config.MODE
+                ]
+                self.trades_tab.append_row(full_row)
+
             # Also remove from ActiveTrades
             self.remove_active_trade(trade['symbol'])
         except Exception as e:

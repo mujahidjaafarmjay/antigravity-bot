@@ -199,6 +199,7 @@ class TradingBot:
 
                     # Update Daily PnL
                     self.daily_pnl += net_pnl
+                    trade['exit_price'] = exit_price # Tier 8 Dashboard refinement
                     self.sheets.update_meta(self.daily_pnl, self.is_halted, self.risk.peak_balance) # Persist immediately
 
                     # Track Loss Streak for Kill Switch
