@@ -13,6 +13,7 @@ class SheetsPersistence:
     def __init__(self):
         self.logger = logging.getLogger(__name__)
         self.sheet = None
+        self.is_connected = False
         self.trades_tab = None
         self.perf_tab = None
         self.active_tab = None
@@ -44,8 +45,10 @@ class SheetsPersistence:
 
             # Ensure tabs exist
             self._setup_tabs()
+            self.is_connected = True
             self.logger.info("Connected to Google Sheets persistence.")
         except Exception as e:
+            self.is_connected = False
             self.logger.error(f"Error connecting to Google Sheets: {e}")
 
     def _setup_tabs(self):

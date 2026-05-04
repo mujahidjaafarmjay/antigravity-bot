@@ -58,8 +58,6 @@ class TradingBot:
         self.closed_trades_count = 0 # Counter to avoid aggressive optimization
         self.instance_id = datetime.now().strftime("%H%M%S") # Unique ID for this run
         
-        self._recover_state()
-
     def _recover_state(self):
         """Recovers state and reconciles Sheets with Exchange reality."""
         logger.info("Recovering state from Google Sheets...")
@@ -584,14 +582,23 @@ if __name__ == "__main__":
     # Start Flask heartbeat in background
     threading.Thread(target=run_flask, daemon=True).start()
     
+    # 1. Component Initialization (Fast)
     bot = TradingBot()
     
-    # Start Telegram Listener in background
+    # 2. Start Telegram Listener IMMEDIATELY
+    # It will respond to /ping even if recovery is slow
     def start_telegram():
+        logger.info(f"Telegram Thread starting with PID {os.getpid()}...")
         loop = asyncio.new_event_loop()
         asyncio.set_event_loop(loop)
         loop.run_until_complete(bot.cmd_handler.run_listener())
         
     threading.Thread(target=start_telegram, daemon=True).start()
     
+    # 3. Perform Heavy State Recovery
+    logger.info("Starting institutional state recovery...")
+    bot._recover_state()
+
+    # 4. Final Milestone: Enter Main Loop
+    logger.info("Bot components initialized and state recovered. Entering Main Engine Loop.")
     bot.run()
