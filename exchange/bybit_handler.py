@@ -244,3 +244,20 @@ class BybitHandler:
         except Exception as e:
             self.logger.error(f"Error cancelling orders for {symbol}: {e}")
             return False
+
+    def emergency_market_sell(self, symbol, qty):
+        """Immediately sells a position at market price."""
+        try:
+            info = self.get_symbol_info(symbol)
+            qty_str = self._to_str(qty, info["qty_step"])
+            res = self.session.place_order(
+                category=self.category,
+                symbol=symbol,
+                side="Sell",
+                orderType="Market",
+                qty=qty_str
+            )
+            return res.get("retCode") == 0
+        except Exception as e:
+            self.logger.error(f"Emergency Sell Failed for {symbol}: {e}")
+            return False

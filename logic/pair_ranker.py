@@ -9,6 +9,7 @@ class PairRanker:
     def __init__(self, min_trades_required=5):
         self.min_trades = min_trades_required
         self.symbol_performance = {} # {symbol: expectancy}
+        self.banned_until = {} # {symbol: timestamp}
         self.logger = logging.getLogger(__name__)
 
     def update_rankings(self, performance_data):
@@ -63,11 +64,25 @@ class PairRanker:
         return 1.0
 
     def should_skip_symbol(self, symbol):
-        """Hard filter for toxic symbols (Tier 7: Skip any negative expectancy)."""
+        """Hard filter for toxic symbols (Tier 8: 48h Ban for negative expectancy)."""
+        from datetime import datetime
+
+        # 1. Check if currently banned
+        if symbol in self.banned_until:
+            if datetime.now() < self.banned_until[symbol]:
+                return True
+            else:
+                del self.banned_until[symbol]
+
+        # 2. Check performance
         if symbol in self.symbol_performance:
             # If we have 10+ trades and expectancy is negative, it's a toxic pair for our strategy
             # Using 10 trades for a more stable statistical sample.
             trades = getattr(self, 'symbol_trade_counts', {}).get(symbol, 0)
             if trades >= 10 and self.symbol_performance[symbol] <= 0:
+                # Tier 8: Implement 48h Cooling off period for toxic pairs
+                from datetime import timedelta
+                self.banned_until[symbol] = datetime.now() + timedelta(hours=48)
+                self.logger.warning(f"🚫 {symbol} banned for 48h due to negative expectancy.")
                 return True
         return False

@@ -50,6 +50,7 @@ class TradingBot:
         self.daily_pnl = 0.0
         self.is_halted = False
         self.starting_balance = 0.0
+        self.last_recovery_state = False # For Telegram alerts
         self.reported_signals = {} # Track last score sent to Telegram
         self.execution_lock = {} # Prevent duplicate execution attempts
         self.daily_trade_count = 0 # Tier 7 Frequency Control
@@ -63,9 +64,11 @@ class TradingBot:
         """Recovers state and reconciles Sheets with Exchange reality."""
         logger.info("Recovering state from Google Sheets...")
         meta = self.sheets.get_meta()
+        self.risk.peak_balance = meta.get('peak_balance', 0.0)
+        self.ranker.banned_until = self.sheets.recover_bans()
 
         # Daily PnL Reset Logic
-        last_run_str = self.sheets.get_bot_meta("last_reset_date")
+        last_run_str = meta.get('last_trade_day', "")
         today_str = datetime.now().strftime("%Y-%m-%d")
 
         if last_run_str != today_str:
@@ -73,10 +76,11 @@ class TradingBot:
             self.daily_pnl = 0.0
             self.daily_trade_count = 0
             self.is_halted = False
-            self.sheets.set_bot_meta("last_reset_date", today_str)
-            self.sheets.update_meta(0.0, False)
+            self.starting_balance = self.bybit.get_balance() # Refresh baseline
+            self.sheets.update_meta(0.0, False, self.risk.peak_balance, 0, today_str)
         else:
             self.daily_pnl = meta.get('daily_net_pnl', 0.0)
+            self.daily_trade_count = meta.get('daily_trade_count', 0)
             self.is_halted = meta.get('is_halted', False)
 
         # 1. Fetch truth from exchange
@@ -117,17 +121,23 @@ class TradingBot:
         rolling_perf = all_perf[-30:] if len(all_perf) > 30 else all_perf
         summary = self.sheets.get_performance_summary(rolling_perf)
 
+        # 3. Tier 8 Dashboard & Specialized Analytics
+        self.sheets.update_analytics_tabs(summary)
+        self.sheets.persist_bans(self.ranker.banned_until)
+
         if config.CALIBRATION_MODE:
             logger.info("Bot in CALIBRATION MODE. Tier 2 Engine (Optimizer/Ranker) suspended.")
             self.brain.set_disabled_scores(set())
             # We still run ranker update to track data, but don't apply filters
-            self.ranker.update_rankings(raw_perf)
+            self.ranker.update_rankings(all_perf)
             return
 
         logger.info("Running Tier 2 Strategy Optimization...")
 
-        # Update Stats Tab in Sheets for visibility
-        self.sheets.update_stats_tab(summary)
+        # Dashboard Update
+        current_bal = self.bybit.get_balance()
+        drawdown = (self.risk.peak_balance - current_bal) / self.risk.peak_balance if self.risk.peak_balance > 0 else 0
+        self.sheets.update_dashboard(summary, drawdown, self.risk.in_recovery_mode, current_bal, self.risk.peak_balance)
 
         # 1. Score-Level Optimization
         disabled = self.optimizer.analyze_and_optimize(summary)
@@ -140,7 +150,7 @@ class TradingBot:
         self.brain.set_disabled_scores(disabled)
 
         # 2. Symbol-Level Ranking
-        self.ranker.update_rankings(raw_perf)
+        self.ranker.update_rankings(all_perf)
 
     def _monitor_active_trades(self):
         """Checks if active trades hit TP or SL."""
@@ -164,14 +174,24 @@ class TradingBot:
                     outcome = "LOSS"
                     exit_price = trade['stop_loss']
                 else:
-                    # Tier 8: Dead Trade Detection (4-hour time-based exit)
+                    # Tier 8: Dead Trade Detection (Adaptive time-based exit)
                     if 'timestamp' in trade:
                         try:
                             start_time = datetime.strptime(trade['timestamp'], "%Y-%m-%d %H:%M:%S").replace(tzinfo=self.utc)
                             duration_mins = int((datetime.now(self.utc) - start_time).total_seconds() / 60)
-                            if duration_mins >= 240: # 4 hours
-                                outcome = "TIME_EXIT"
-                                logger.info(f"⌛ DEAD TRADE DETECTION: Closing {symbol} after 4 hours.")
+
+                            # Adaptive Timeout: Shorter in low volatility (3h), longer in high volatility (6h)
+                            atr_perc = trade.get('atr_perc', 1.0)
+                            timeout_mins = 360 if atr_perc > 2.0 else 180 # 6h if volatile, 3h if stagnant
+
+                            if duration_mins >= timeout_mins:
+                                # Tier 8: Don't kill slow winners
+                                gross_pnl = (current_price - trade['entry']) * trade['qty']
+                                if gross_pnl > 0:
+                                    logger.info(f"⌛ Slow Winner: {symbol} in profit, extending timeout.")
+                                else:
+                                    outcome = "TIME_EXIT"
+                                    logger.info(f"⌛ DEAD TRADE DETECTION: Closing {symbol} after {timeout_mins} mins.")
                         except: pass
 
                 if outcome:
@@ -187,17 +207,25 @@ class TradingBot:
 
                     # Update Daily PnL
                     self.daily_pnl += net_pnl
-                    self.sheets.update_meta(self.daily_pnl, self.is_halted) # Persist immediately
+                    trade['exit_price'] = exit_price # Tier 8 Dashboard refinement
+                    self.sheets.update_meta(self.daily_pnl, self.is_halted, self.risk.peak_balance) # Persist immediately
 
                     # Track Loss Streak for Kill Switch
                     self.risk.update_loss_streak(outcome)
-                    if self.risk.is_kill_switch_active(perf_summary):
+
+                    # Tier 8: Context-aware Kill Switch check
+                    all_perf = self.sheets.get_all_performance_data()
+                    rolling_perf = all_perf[-30:] if len(all_perf) > 30 else all_perf
+                    perf_summary = self.sheets.get_performance_summary(rolling_perf)
+
+                    if self.risk.is_kill_switch_active(perf_summary, self.daily_pnl):
                         logger.critical(f"🚨 SMART KILL SWITCH TRIGGERED: {self.risk.consecutive_losses} consecutive losses. Bot halting.")
                         self.is_halted = True
-                        self.telegram.alert_critical("Bot halted by Smart Kill Switch (3 consecutive losses).")
+                        self.telegram.alert_critical(f"Bot halted by Smart Kill Switch ({self.risk.consecutive_losses} consecutive losses).")
 
                     # Log to Sheets with High-Fidelity Data
-                    self.sheets.log_outcome(trade, outcome, net_pnl, total_fees)
+                    slippage = abs(trade['entry'] - trade.get('expected_entry', trade['entry']))
+                    self.sheets.log_outcome(trade, outcome, net_pnl, total_fees, slippage=slippage)
 
                     # Notify Telegram
                     emoji = "💰" if outcome == "WIN" else "📉"
@@ -232,7 +260,7 @@ class TradingBot:
                 # 1. Safety Checks
                 if self.is_halted:
                     # Check if Kill Switch can auto-recover
-                    if not self.risk.is_kill_switch_active(perf_summary):
+                    if not self.risk.is_kill_switch_active(perf_summary, self.daily_pnl):
                         logger.info("Bot auto-recovering from Smart Kill Switch...")
                         self.is_halted = False
                     else:
@@ -253,6 +281,23 @@ class TradingBot:
                     continue
 
                 balance = self.bybit.get_balance()
+
+                # Check Real Edge for Recovery Exit
+                g = perf_summary.get("GLOBAL", {})
+                real_edge_val = g.get('real_edge', 0)
+
+                self.risk.update_peak_balance(balance)
+                # Hard Tier 8 Guard: Stay in recovery if Real Edge is weak (< 5 bps)
+                if self.risk.in_recovery_mode == False and real_edge_val < 0.0005:
+                    self.risk.in_recovery_mode = True
+
+                # Recovery Mode Alerts
+                if self.risk.in_recovery_mode != self.last_recovery_state:
+                    if self.risk.in_recovery_mode:
+                        self.telegram.send_message("⚠️ <b>RECOVERY MODE ACTIVATED</b>\nSelectivity increased (Score 5+), Risk halved.")
+                    else:
+                        self.telegram.send_message("✅ <b>RECOVERY MODE EXITED</b>\nGrowth parameters restored.")
+                    self.last_recovery_state = self.risk.in_recovery_mode
                 if balance <= 0:
                     logger.error("Balance unreadable or 0. Skipping iteration.")
                     time.sleep(config.BALANCE_CACHE_SECONDS)
@@ -261,18 +306,21 @@ class TradingBot:
                 # Check Daily Loss (Hard USDT limit or Percentage)
                 if self.risk.check_daily_loss(self.daily_pnl, self.starting_balance):
                     self.is_halted = True
-                    self.sheets.update_meta(self.daily_pnl, self.is_halted)
+                    self.sheets.update_meta(self.daily_pnl, self.is_halted, self.risk.peak_balance, self.daily_trade_count, datetime.now().strftime("%Y-%m-%d"))
                     self.telegram.alert_critical(f"Daily loss limit reached (${self.daily_pnl:.2f}). Trading halted.")
                     continue
 
-                # Tier 7: Daily Trade Frequency Control
-                if self.daily_trade_count >= self.risk.max_trades_per_day:
-                    logger.warning(f"Daily trade limit reached ({self.risk.max_trades_per_day}). Scanning paused.")
+                # 2. Monitor Active Trades (TP/SL) - ALWAYS run this
+                self._monitor_active_trades()
+
+                # Tier 7: Daily Trade Frequency Control (Adaptive)
+                # Recovery Mode: 2 trades/day | Growth Mode: 5 trades/day
+                max_daily = 2 if self.risk.in_recovery_mode else self.risk.max_trades_per_day
+                if self.daily_trade_count >= max_daily:
+                    logger.warning(f"Daily trade limit reached ({max_daily}). Scanning paused.")
+                    self.sheets.update_meta(self.daily_pnl, self.is_halted, self.risk.peak_balance, self.daily_trade_count, datetime.now().strftime("%Y-%m-%d"))
                     time.sleep(3600)
                     continue
-
-                # 2. Monitor Active Trades (TP/SL)
-                self._monitor_active_trades()
 
                 # 3. Global Market Trend Filter
                 btc_df, _, _ = self.bybit.get_market_data("BTCUSDT")
@@ -284,8 +332,13 @@ class TradingBot:
                     time.sleep(300)
                     continue
 
-                # 4. Iterate through Halal Pairs
-                for symbol in config.HALAL_PAIRS:
+                # 4. Iterate through Halal Pairs (Sorted by Performance for Tier 8 Priority)
+                sorted_pairs = sorted(
+                    config.HALAL_PAIRS,
+                    key=lambda s: self.ranker.symbol_performance.get(s, 0.0),
+                    reverse=True
+                )
+                for symbol in sorted_pairs:
                     # Prevent multiple active trades for same symbol (Duplicate Guard)
                     if symbol in self.active_trades:
                         continue
@@ -310,7 +363,15 @@ class TradingBot:
                         continue
 
                     # Evaluate Trade
-                    decision = self.brain.evaluate_trade(symbol, df, balance)
+                    # Recovery Mode: Increase threshold to Score 5+
+                    if getattr(self.risk, 'in_recovery_mode', False) and not config.CALIBRATION_MODE:
+                        orig_threshold = self.brain.disabled_scores.copy()
+                        # Temporarily disable lower scores (3, 4) in recovery mode
+                        self.brain.disabled_scores.update({3, 4})
+                        decision = self.brain.evaluate_trade(symbol, df, balance)
+                        self.brain.disabled_scores = orig_threshold # Reset
+                    else:
+                        decision = self.brain.evaluate_trade(symbol, df, balance)
 
                     # Tier 4 Volatility Guard
                     if self.risk.is_volatility_too_high(df):
@@ -423,21 +484,45 @@ class TradingBot:
                                     # ✅ SUCCESS
                                     self.daily_trade_count += 1
                                     order_id = result['order_id']
-                                    logger.info(f"✅ SUCCESS: Trade executed for {symbol} | ID: {order_id}")
+                                    fill_price = result['price']
+
+                                    # Tier 8: Slippage Guard (Bad Fill Detection)
+                                    slippage_perc = abs(fill_price - exec_price) / exec_price
+                                    slip_status = "GOOD"
+                                    if slippage_perc > 0.003: # 0.3%
+                                        slip_status = "BAD_FILL"
+                                        logger.warning(f"⚠️ BAD FILL: {symbol} slippage {slippage_perc:.2%}")
+                                        self.telegram.send_message(f"⚠️ <b>BAD FILL: {symbol}</b>\nSlippage: {slippage_perc:.2%}\nPrice: ${fill_price}")
+
+                                    # Tier 8: "Terrible Fill" Emergency Exit (Hardened)
+                                    if slippage_perc > 0.005: # 0.5%
+                                        # Only emergency close if market conditions are also toxic (wide spread or spike)
+                                        spread_val = (ask - bid) / bid if bid > 0 else 0
+                                        if spread_val > 0.003 or self.risk.is_volatility_too_high(df):
+                                            logger.critical(f"🚨 TERRIBLE FILL: {symbol} slippage {slippage_perc:.2%}. Emergency closing.")
+                                            self.telegram.alert_critical(f"Emergency Exit: {symbol} filled with {slippage_perc:.2%} slippage in toxic conditions.")
+                                            # Emergency close with market order
+                                            self.bybit.emergency_market_sell(symbol, result['qty'])
+                                            self.cooldowns[symbol] = now + timedelta(minutes=60)
+                                            continue
+
+                                    logger.info(f"✅ SUCCESS: Trade executed for {symbol} | ID: {order_id} | Slip: {slip_status}")
                                     self.telegram.send_message(
                                         f"✅ <b>ORDER PLACED: {symbol}</b>\n"
                                         f"Qty: {result['qty']}\n"
-                                        f"Price: {result['price']}\n"
-                                        f"ID: {order_id}"
+                                        f"Price: {fill_price}\n"
+                                        f"Slip: {slip_status} ({slippage_perc:.2%})"
                                     )
                                     
                                     # Active Trade Tracking with Tier 4 metadata
+                                    # Tier 8: Track expected price for slippage calculation
                                     new_trade = {
                                         "symbol": symbol,
                                         "score": decision['score'],
                                         "rr": rr,
                                         "risk_usdt": risk_usdt,
                                         "entry": result['price'],
+                                        "expected_entry": exec_price,
                                         "stop_loss": decision['stop_loss'],
                                         "take_profit": decision['take_profit'],
                                         "qty": result['qty'],
@@ -478,7 +563,7 @@ class TradingBot:
                     time.sleep(config.API_DELAY) # Avoid rate limits
 
                 # Update Meta periodically
-                self.sheets.update_meta(self.daily_pnl, self.is_halted)
+                self.sheets.update_meta(self.daily_pnl, self.is_halted, self.risk.peak_balance)
                 
                 # Sleep before next scan (Check for manual scan request every second)
                 logger.info("Scan complete. Sleeping...")

@@ -11,23 +11,28 @@ class TelegramSender:
         self.logger = logging.getLogger(__name__)
 
     def send_message(self, message):
-        """Sends a simple text message."""
+        """Sends a simple text message with robust retry logic."""
         if not self.token or not self.chat_id:
             self.logger.warning("Telegram token or chat_id missing.")
             return
 
-        try:
-            url = f"https://api.telegram.org/bot{self.token}/sendMessage"
-            payload = {
-                "chat_id": self.chat_id,
-                "text": message,
-                "parse_mode": "HTML"
-            }
-            response = requests.post(url, json=payload)
-            return response.json()
-        except Exception as e:
-            self.logger.error(f"Error sending Telegram message: {e}")
-            return None
+        for attempt in range(3):
+            try:
+                url = f"https://api.telegram.org/bot{self.token}/sendMessage"
+                payload = {
+                    "chat_id": self.chat_id,
+                    "text": message,
+                    "parse_mode": "HTML"
+                }
+                response = requests.post(url, json=payload, timeout=10)
+                if response.status_code == 200:
+                    return response.json()
+                elif response.status_code == 429:
+                    import time
+                    time.sleep(2 * (attempt + 1))
+            except Exception as e:
+                self.logger.error(f"Error sending Telegram message (Attempt {attempt+1}): {e}")
+        return None
 
     def alert_trade(self, trade_data):
         """Sends a formatted trade alert."""

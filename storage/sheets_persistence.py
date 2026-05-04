@@ -18,6 +18,11 @@ class SheetsPersistence:
         self.active_tab = None
         self.meta_tab = None
         self.stats_tab = None
+        self.dash_tab = None
+        self.score_tab = None
+        self.pair_tab = None
+        self.session_tab = None
+        self.ban_tab = None
         self._connect()
 
     def _connect(self):
@@ -44,25 +49,27 @@ class SheetsPersistence:
             self.logger.error(f"Error connecting to Google Sheets: {e}")
 
     def _setup_tabs(self):
-        """Creates 'Trades', 'Performance', 'ActiveTrades', 'Stats', and 'BotMeta' tabs if they don't exist."""
+        """Creates all institutional tabs for data-driven trading."""
         try:
             # Trades Tab (Signal Log)
             try:
                 self.trades_tab = self.sheet.worksheet("Trades")
             except gspread.WorksheetNotFound:
-                self.trades_tab = self.sheet.add_worksheet("Trades", rows=1000, cols=10)
+                self.trades_tab = self.sheet.add_worksheet("Trades", rows=2000, cols=20)
                 self.trades_tab.append_row([
-                    "Timestamp", "Symbol", "Action", "Score", "Entry", "SL", "TP", "Qty", "Reason", "Sharia_Status"
+                    "Timestamp", "Symbol", "Score", "Entry", "Exit", "SL", "TP", "Qty",
+                    "RR", "Risk_USDT", "Gross_PnL", "Fees", "Net_PnL", "Slippage",
+                    "Session", "ATR_Perc", "Duration_Mins", "Outcome", "Reason", "Mode"
                 ])
 
-            # Performance Tab (Outcome Log)
+            # Performance Tab (Alias for historical reasons, now mirroring Dashboard/Stats logic)
             try:
                 self.perf_tab = self.sheet.worksheet("Performance")
             except gspread.WorksheetNotFound:
-                self.perf_tab = self.sheet.add_worksheet("Performance", rows=2000, cols=15)
+                self.perf_tab = self.sheet.add_worksheet("Performance", rows=2000, cols=20)
                 self.perf_tab.append_row([
                     "Timestamp", "Symbol", "Score", "RR", "Risk_USDT", "Entry", "SL", "TP",
-                    "Outcome", "PnL", "Fees", "Duration_Mins", "Session", "ATR_Perc", "Mode"
+                    "Outcome", "PnL", "Fees", "Duration_Mins", "Session", "ATR_Perc", "Slippage", "Mode"
                 ])
 
             # Active Trades Tab (for recovery)
@@ -84,6 +91,51 @@ class SheetsPersistence:
                     "Metric_Type", "Key", "Trades", "WinRate", "NetPnL", "Expectancy", "ProfitFactor", "AvgWin", "AvgLoss", "LastUpdate"
                 ])
 
+            # Dashboard Tab (Executive Summary)
+            try:
+                self.dash_tab = self.sheet.worksheet("Dashboard")
+            except gspread.WorksheetNotFound:
+                self.dash_tab = self.sheet.add_worksheet("Dashboard", rows=50, cols=2)
+                self.dash_tab.update("A1:B10", [
+                    ["Institutional KPI", "Value"],
+                    ["Total Net PnL", "0.0"],
+                    ["Max Drawdown (%)", "0.0"],
+                    ["Recovery Progress (%)", "0.0"],
+                    ["Avg Slippage (bps)", "0.0"],
+                    ["Profit Factor", "0.0"],
+                    ["Real Edge (bps)", "0.0"],
+                    ["Last Scan Time", ""],
+                    ["Bot Status", "RUNNING"]
+                ])
+
+            # Score Analytics
+            try:
+                self.score_tab = self.sheet.worksheet("ScoreAnalytics")
+            except gspread.WorksheetNotFound:
+                self.score_tab = self.sheet.add_worksheet("ScoreAnalytics", rows=50, cols=10)
+                self.score_tab.append_row(["Score", "Trades", "Wins", "Losses", "WinRate", "AvgWin", "AvgLoss", "Expectancy", "Status"])
+
+            # Pair Analytics
+            try:
+                self.pair_tab = self.sheet.worksheet("PairAnalytics")
+            except gspread.WorksheetNotFound:
+                self.pair_tab = self.sheet.add_worksheet("PairAnalytics", rows=100, cols=10)
+                self.pair_tab.append_row(["Pair", "Trades", "WinRate", "Expectancy", "NetPnL", "Status"])
+
+            # Session Analytics
+            try:
+                self.session_tab = self.sheet.worksheet("SessionAnalytics")
+            except gspread.WorksheetNotFound:
+                self.session_tab = self.sheet.add_worksheet("SessionAnalytics", rows=20, cols=10)
+                self.session_tab.append_row(["Session", "Trades", "WinRate", "AvgSlip", "Expectancy"])
+
+            # Banned Pairs Tab
+            try:
+                self.ban_tab = self.sheet.worksheet("BannedPairs")
+            except gspread.WorksheetNotFound:
+                self.ban_tab = self.sheet.add_worksheet("BannedPairs", rows=100, cols=2)
+                self.ban_tab.append_row(["Symbol", "BannedUntil"])
+
             # BotMeta Tab
             try:
                 self.meta_tab = self.sheet.worksheet("BotMeta")
@@ -93,6 +145,9 @@ class SheetsPersistence:
                     ["Key", "Value"],
                     ["daily_net_pnl", "0.0"],
                     ["is_halted", "False"],
+                    ["peak_balance", "0.0"],
+                    ["daily_trade_count", "0"],
+                    ["last_trade_day", ""],
                     ["last_run", ""]
                 ])
         except Exception as e:
@@ -117,9 +172,8 @@ class SheetsPersistence:
         except Exception as e:
             self.logger.error(f"Error logging trade to Sheets: {e}")
 
-    def log_outcome(self, trade, outcome, pnl, fees):
-        """Logs a finished trade outcome with high-fidelity metrics."""
-        if not self.perf_tab: return
+    def log_outcome(self, trade, outcome, pnl, fees, slippage=0.0):
+        """Logs a finished trade outcome with high-fidelity metrics to both Performance and Trades tabs."""
         try:
             # Calculate duration
             duration = ""
@@ -130,7 +184,7 @@ class SheetsPersistence:
                     duration = mins
                 except: pass
 
-            self.perf_tab.append_row([
+            row_data = [
                 datetime.now().strftime("%Y-%m-%d %H:%M:%S"),
                 trade['symbol'],
                 trade['score'],
@@ -145,8 +199,28 @@ class SheetsPersistence:
                 duration,
                 trade.get('session', ''),
                 trade.get('atr_perc', 0),
+                f"{slippage:.4f}",
                 config.MODE
-            ])
+            ]
+
+            # 1. Log to Performance (Institutional Outcome Log)
+            if self.perf_tab:
+                self.perf_tab.append_row(row_data)
+
+            # 2. Log to Trades (Full Single-Source Log)
+            if self.trades_tab:
+                # Mirroring the 20-column header:
+                # Timestamp, Symbol, Score, Entry, Exit, SL, TP, Qty, RR, Risk_USDT, Gross_PnL, Fees, Net_PnL, Slippage, Session, ATR_Perc, Duration, Outcome, Reason, Mode
+                full_row = [
+                    row_data[0], trade['symbol'], trade['score'], trade['entry'],
+                    trade.get('exit_price', trade['entry']), trade['stop_loss'], trade['take_profit'],
+                    trade.get('qty', 0), trade.get('rr', 0), trade.get('risk_usdt', 0),
+                    pnl + fees, fees, pnl, f"{slippage:.4f}",
+                    trade.get('session', ''), trade.get('atr_perc', 0), duration, outcome,
+                    trade.get('reason', ''), config.MODE
+                ]
+                self.trades_tab.append_row(full_row)
+
             # Also remove from ActiveTrades
             self.remove_active_trade(trade['symbol'])
         except Exception as e:
@@ -221,41 +295,62 @@ class SheetsPersistence:
             self.logger.error(f"Error fetching performance data: {e}")
             return []
 
-    def update_stats_tab(self, summary):
-        """Updates the 'Stats' tab with the latest performance summary."""
-        if not self.stats_tab: return
+    def update_dashboard(self, summary, drawdown, in_recovery, balance, peak):
+        """Updates the Dashboard tab with high-level KPIs."""
+        if not self.dash_tab: return
         try:
-            now = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
-            rows = []
-
-            # 1. Global Stats
             g = summary.get("GLOBAL", {})
-            rows.append([
-                "GLOBAL", "ALL", g.get("trades", 0),
-                f"{g.get('wins', 0)/g.get('trades', 1):.1%}" if g.get('trades', 0) > 0 else "0%",
-                g.get("net_pnl", 0.0), 0, # Expectancy not defined for global here
-                f"{g.get('gross_win_pnl', 0) / g.get('gross_loss_pnl', 1):.2f}" if g.get('gross_loss_pnl', 0) > 0 else "1.0",
-                0, 0, now
-            ])
+            now = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
 
-            # 2. Score Stats
-            for key in sorted(summary.keys()):
-                if key == "GLOBAL": continue
-                s = summary[key]
-                rows.append([
-                    "SCORE", key, s["trades"], f"{s['win_rate']:.1%}",
-                    s["net_pnl"], s["expectancy"], s["profit_factor"],
-                    s["avg_win"], s["avg_loss"], now
-                ])
+            recovery_prog = (balance / peak * 100) if peak > 0 and in_recovery else 100.0
+            status = "RECOVERY MODE" if in_recovery else "GROWTH MODE"
 
-            # Clear and Update
-            self.stats_tab.clear()
-            self.stats_tab.append_row([
-                "Metric_Type", "Key", "Trades", "WinRate", "NetPnL", "Expectancy", "ProfitFactor", "AvgWin", "AvgLoss", "LastUpdate"
-            ])
-            self.stats_tab.append_rows(rows)
+            # Basis points (bps) = % * 10000
+            kpis = [
+                ["Total Net PnL", f"${g.get('net_pnl', 0):.2f}"],
+                ["Max Drawdown (%)", f"{drawdown:.2%}"],
+                ["Recovery Progress (%)", f"{recovery_prog:.1f}%"],
+                ["Avg Slippage (bps)", f"{g.get('avg_slippage', 0)*10000:.1f}"],
+                ["Profit Factor", f"{g.get('profit_factor', 1.0):.2f}"],
+                ["Real Edge (bps)", f"{g.get('real_edge', 0)*10000:.1f}"],
+                ["Last Update", now],
+                ["Bot Status", status],
+                ["Compounding Mult", "1.01x" if balance >= peak else "1.00x"]
+            ]
+            self.dash_tab.update("B2:B10", [[k[1]] for k in kpis])
         except Exception as e:
-            self.logger.error(f"Error updating Stats tab: {e}")
+            self.logger.error(f"Error updating Dashboard: {e}")
+
+    def update_analytics_tabs(self, summary):
+        """Updates Score, Pair, and Session analytics tabs (Tier 8/9)."""
+        now = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
+
+        # 1. Score Analytics
+        if self.score_tab:
+            rows = []
+            for k in sorted([x for x in summary.keys() if isinstance(x, int)]):
+                s = summary[k]
+                status = "✅ ACTIVE" if s['expectancy'] > 0 else "❌ DISABLED"
+                rows.append([k, s['trades'], s['wins'], s['losses'], f"{s['win_rate']:.1%}",
+                             f"${s['avg_win']:.2f}", f"${s['avg_loss']:.2f}", f"{s['expectancy']:.4f}", status])
+            self.score_tab.clear()
+            self.score_tab.append_row(["Score", "Trades", "Wins", "Losses", "WinRate", "AvgWin", "AvgLoss", "Expectancy", "Status"])
+            if rows: self.score_tab.append_rows(rows)
+
+        # 2. Stats (Unified view)
+        if self.stats_tab:
+            rows = []
+            for key in sorted(summary.keys(), key=lambda x: str(x)):
+                s = summary[key]
+                metric_type = "GLOBAL" if key == "GLOBAL" else "SCORE"
+                rows.append([
+                    metric_type, key, s["trades"], f"{s['win_rate']:.1%}",
+                    f"${s['net_pnl']:.2f}", f"{s['expectancy']:.4f}", f"{s['profit_factor']:.2f}",
+                    f"{s.get('real_edge', 0):.4f}", f"{s.get('avg_slippage', 0):.4f}", now
+                ])
+            self.stats_tab.clear()
+            self.stats_tab.append_row(["Metric_Type", "Key", "Trades", "WinRate", "NetPnL", "Expectancy", "ProfitFactor", "RealEdge", "AvgSlip", "LastUpdate"])
+            if rows: self.stats_tab.append_rows(rows)
 
     def get_performance_summary(self, data=None):
         """Calculates performance metrics grouped by score and global stats."""
@@ -293,17 +388,22 @@ class SheetsPersistence:
                 pnl = float(row.get('PnL', row.get('net_pnl', 0)))
                 fees = float(row.get('Fees', row.get('fees', 0)))
                 outcome = row.get('Outcome', row.get('outcome', ''))
+                slippage = float(row.get('Slippage', 0))
 
                 # Update Score Stats
                 s = summary[score]
                 s["trades"] += 1
                 s["total_fees"] += fees
+                if "slippages" not in s: s["slippages"] = []
+                s["slippages"].append(slippage)
 
                 # Update Global Stats
                 g = summary["GLOBAL"]
                 g["trades"] += 1
                 g["total_fees"] += fees
                 g["net_pnl"] += pnl
+                if "slippages" not in g: g["slippages"] = []
+                g["slippages"].append(slippage)
 
                 if outcome.upper() == "WIN":
                     s["wins"] += 1
@@ -326,28 +426,30 @@ class SheetsPersistence:
         # Finalize calculations
         final_summary = {}
         for key, s in summary.items():
-            if key == "GLOBAL":
-                final_summary["GLOBAL"] = s
-                continue
-
             win_rate = s["wins"] / s["trades"] if s["trades"] > 0 else 0
-
-            # Correct Avg Win/Loss: only use data from corresponding outcomes
             avg_win = s["gross_win_pnl"] / s["wins"] if s["wins"] > 0 else 0.0
             avg_loss = s["gross_loss_pnl"] / s["losses"] if s["losses"] > 0 else 0.0
-
-            # Expectancy = (WinRate * AvgWin) - (LossRate * AvgLoss)
             expectancy = (win_rate * avg_win) - ((1 - win_rate) * avg_loss)
-
-            # Profit Factor = Gross Wins / Gross Losses
             profit_factor = s["gross_win_pnl"] / s["gross_loss_pnl"] if s["gross_loss_pnl"] > 0 else (float('inf') if s["gross_win_pnl"] > 0 else 1.0)
+
+            avg_slippage = sum(s.get("slippages", [])) / s["trades"] if s["trades"] > 0 else 0
+            net_pnl = s["gross_win_pnl"] - s["gross_loss_pnl"] - s["total_fees"]
+
+            # Tier 8: Standardized Institutional Execution Cost (bps)
+            # Formula: ((avg_slippage + round_trip_fees) * 10000)
+            # We assume avg_slippage is already a ratio (e.g. 0.001)
+            # Bybit Spot fee is 0.1% each side = 0.002 round trip
+            avg_fee_ratio = (s["total_fees"] / (s["trades"] * 40)) if s["trades"] > 0 else 0.002
+            real_edge = expectancy - (avg_slippage + avg_fee_ratio)
 
             final_summary[key] = {
                 "score": key,
                 "trades": s["trades"],
                 "win_rate": win_rate,
-                "net_pnl": s["gross_win_pnl"] - s["gross_loss_pnl"] - s["total_fees"],
+                "net_pnl": net_pnl,
                 "expectancy": expectancy,
+                "real_edge": real_edge,
+                "avg_slippage": avg_slippage,
                 "profit_factor": profit_factor,
                 "avg_win": avg_win,
                 "avg_loss": avg_loss,
@@ -370,6 +472,33 @@ class SheetsPersistence:
             self.logger.error(f"Error reading BotMeta key {key}: {e}")
             return None
 
+    def persist_bans(self, banned_dict):
+        """Saves banned pairs to Sheets."""
+        if not self.ban_tab: return
+        try:
+            self.ban_tab.clear()
+            self.ban_tab.append_row(["Symbol", "BannedUntil"])
+            rows = [[s, t.strftime("%Y-%m-%d %H:%M:%S")] for s, t in banned_dict.items()]
+            if rows:
+                self.ban_tab.append_rows(rows)
+        except Exception as e:
+            self.logger.error(f"Error persisting bans: {e}")
+
+    def recover_bans(self):
+        """Recovers banned pairs from Sheets."""
+        if not self.ban_tab: return {}
+        try:
+            records = self.ban_tab.get_all_records()
+            banned = {}
+            for r in records:
+                try:
+                    banned[r['Symbol']] = datetime.strptime(r['BannedUntil'], "%Y-%m-%d %H:%M:%S")
+                except: continue
+            return banned
+        except Exception as e:
+            self.logger.error(f"Error recovering bans: {e}")
+            return {}
+
     def set_bot_meta(self, key, value):
         """Sets a specific metadata value."""
         if not self.meta_tab: return
@@ -383,19 +512,25 @@ class SheetsPersistence:
         except Exception as e:
             self.logger.error(f"Error setting BotMeta key {key}: {e}")
 
-    def update_meta(self, daily_pnl, is_halted):
+    def update_meta(self, daily_pnl, is_halted, peak_balance=0.0, daily_trade_count=0, last_trade_day=""):
         """Updates bot metadata."""
         if not self.meta_tab: return
         try:
             self.meta_tab.update("B2", str(daily_pnl))
             self.meta_tab.update("B3", str(is_halted))
-            self.meta_tab.update("B4", datetime.now().strftime("%Y-%m-%d %H:%M:%S"))
+            if peak_balance > 0:
+                self.meta_tab.update("B4", str(peak_balance))
+            if daily_trade_count >= 0:
+                self.meta_tab.update("B5", str(daily_trade_count))
+            if last_trade_day:
+                self.meta_tab.update("B6", str(last_trade_day))
+            self.meta_tab.update("B7", datetime.now().strftime("%Y-%m-%d %H:%M:%S"))
         except Exception as e:
             self.logger.error(f"Error updating BotMeta: {e}")
 
     def get_meta(self):
         """Retrieves bot metadata for startup recovery."""
-        if not self.meta_tab: return {"daily_net_pnl": 0.0, "is_halted": False}
+        if not self.meta_tab: return {"daily_net_pnl": 0.0, "is_halted": False, "peak_balance": 0.0, "daily_trade_count": 0, "last_trade_day": ""}
         try:
             data = self.meta_tab.get_all_records()
             meta = {}
@@ -404,7 +539,10 @@ class SheetsPersistence:
             
             return {
                 "daily_net_pnl": float(meta.get('daily_net_pnl', 0.0)),
-                "is_halted": meta.get('is_halted', 'False').lower() == 'true'
+                "is_halted": meta.get('is_halted', 'False').lower() == 'true',
+                "peak_balance": float(meta.get('peak_balance', 0.0)),
+                "daily_trade_count": int(meta.get('daily_trade_count', 0)),
+                "last_trade_day": meta.get('last_trade_day', "")
             }
         except Exception as e:
             self.logger.error(f"Error reading BotMeta: {e}")
