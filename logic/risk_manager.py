@@ -70,14 +70,15 @@ class RiskManager:
             self.recovery_exit_time = datetime.now()
 
         # 3. Decision Logic: Stay in recovery if DD > 5% OR if 24h stability period not met
+        # Tier 8: Harden exit (DD must be < 3% and 24h stability)
         stability_check_passed = True
         if self.recovery_exit_time:
             elapsed = (datetime.now() - self.recovery_exit_time).total_seconds() / 3600
             if elapsed < 24: # 24 hour stability filter
                 stability_check_passed = False
 
-        # In recovery if DD is high OR we are still in the 24h cooling off period
-        self.in_recovery_mode = is_currently_in_dd or (not stability_check_passed)
+        # Must be well above the recovery threshold ( < 3% DD ) to consider exit
+        self.in_recovery_mode = drawdown >= 0.03 or (not stability_check_passed)
 
         return drawdown
 
@@ -114,13 +115,14 @@ class RiskManager:
         if session == "LONDON": session_mult = 1.2 # London is high conviction
         elif session == "ASIAN": session_mult = 0.7 # Asia is lower volatility/higher noise
 
-        # 5. Global Execution Quality Guard
-        # If global real edge is low, reduce risk globally
+        # 5. Global Execution Quality Guard (Tier 8 Upgrade)
+        # Smooth scaling based on Real Edge
         exec_mult = 1.0
         if performance_summary and "GLOBAL" in performance_summary:
             g = performance_summary["GLOBAL"]
-            if g.get('real_edge', 0) < 0.0005: # < 5 bps real edge
-                exec_mult = 0.8
+            edge = g.get('real_edge', 0)
+            if edge < 0.0005: exec_mult = 0.8 # < 5 bps
+            elif edge < 0.0010: exec_mult = 0.9 # < 10 bps
 
         # 6. Combined Weighting (Capped at 1.2x for account safety)
         combined_mult = score_mult * symbol_weight * drawdown_mult * spread_mult * session_mult * compounding_mult * exec_mult
@@ -208,7 +210,7 @@ class RiskManager:
             self.consecutive_losses = 0
             self.kill_switch_time = None
 
-    def is_kill_switch_active(self, performance_summary=None):
+    def is_kill_switch_active(self, performance_summary=None, daily_pnl=0.0):
         """
         Tier 8: Hardened Kill Switch.
         Triggers after 3 losses AND expectancy drop.
@@ -218,7 +220,7 @@ class RiskManager:
         threshold = 3
         if performance_summary and "GLOBAL" in performance_summary:
             g = performance_summary["GLOBAL"]
-            if g.get('net_pnl', 0) > 0:
+            if g.get('net_pnl', 0) > 0 and daily_pnl >= 0:
                 threshold = 4 # Allow 4 losses if account is in profit
 
         if self.consecutive_losses < threshold:

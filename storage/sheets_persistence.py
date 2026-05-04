@@ -19,6 +19,10 @@ class SheetsPersistence:
         self.meta_tab = None
         self.stats_tab = None
         self.dash_tab = None
+        self.score_tab = None
+        self.pair_tab = None
+        self.session_tab = None
+        self.ban_tab = None
         self._connect()
 
     def _connect(self):
@@ -45,7 +49,7 @@ class SheetsPersistence:
             self.logger.error(f"Error connecting to Google Sheets: {e}")
 
     def _setup_tabs(self):
-        """Creates 'Trades', 'Performance', 'ActiveTrades', 'Stats', 'Dashboard', and 'BotMeta' tabs if they don't exist."""
+        """Creates all institutional tabs for data-driven trading."""
         try:
             # Trades Tab (Signal Log)
             try:
@@ -103,6 +107,34 @@ class SheetsPersistence:
                     ["Last Scan Time", ""],
                     ["Bot Status", "RUNNING"]
                 ])
+
+            # Score Analytics
+            try:
+                self.score_tab = self.sheet.worksheet("ScoreAnalytics")
+            except gspread.WorksheetNotFound:
+                self.score_tab = self.sheet.add_worksheet("ScoreAnalytics", rows=50, cols=10)
+                self.score_tab.append_row(["Score", "Trades", "Wins", "Losses", "WinRate", "AvgWin", "AvgLoss", "Expectancy", "Status"])
+
+            # Pair Analytics
+            try:
+                self.pair_tab = self.sheet.worksheet("PairAnalytics")
+            except gspread.WorksheetNotFound:
+                self.pair_tab = self.sheet.add_worksheet("PairAnalytics", rows=100, cols=10)
+                self.pair_tab.append_row(["Pair", "Trades", "WinRate", "Expectancy", "NetPnL", "Status"])
+
+            # Session Analytics
+            try:
+                self.session_tab = self.sheet.worksheet("SessionAnalytics")
+            except gspread.WorksheetNotFound:
+                self.session_tab = self.sheet.add_worksheet("SessionAnalytics", rows=20, cols=10)
+                self.session_tab.append_row(["Session", "Trades", "WinRate", "AvgSlip", "Expectancy"])
+
+            # Banned Pairs Tab
+            try:
+                self.ban_tab = self.sheet.worksheet("BannedPairs")
+            except gspread.WorksheetNotFound:
+                self.ban_tab = self.sheet.add_worksheet("BannedPairs", rows=100, cols=2)
+                self.ban_tab.append_row(["Symbol", "BannedUntil"])
 
             # BotMeta Tab
             try:
@@ -287,32 +319,36 @@ class SheetsPersistence:
         except Exception as e:
             self.logger.error(f"Error updating Dashboard: {e}")
 
-    def update_stats_tab(self, summary):
-        """Updates the 'Stats' tab with the latest performance summary."""
-        if not self.stats_tab: return
-        try:
-            now = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
-            rows = []
+    def update_analytics_tabs(self, summary):
+        """Updates Score, Pair, and Session analytics tabs (Tier 8/9)."""
+        now = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
 
-            # Global and Score Analytics (Tier 8 Upgrade)
+        # 1. Score Analytics
+        if self.score_tab:
+            rows = []
+            for k in sorted([x for x in summary.keys() if isinstance(x, int)]):
+                s = summary[k]
+                status = "✅ ACTIVE" if s['expectancy'] > 0 else "❌ DISABLED"
+                rows.append([k, s['trades'], s['wins'], s['losses'], f"{s['win_rate']:.1%}",
+                             f"${s['avg_win']:.2f}", f"${s['avg_loss']:.2f}", f"{s['expectancy']:.4f}", status])
+            self.score_tab.clear()
+            self.score_tab.append_row(["Score", "Trades", "Wins", "Losses", "WinRate", "AvgWin", "AvgLoss", "Expectancy", "Status"])
+            if rows: self.score_tab.append_rows(rows)
+
+        # 2. Stats (Unified view)
+        if self.stats_tab:
+            rows = []
             for key in sorted(summary.keys(), key=lambda x: str(x)):
                 s = summary[key]
                 metric_type = "GLOBAL" if key == "GLOBAL" else "SCORE"
-
                 rows.append([
                     metric_type, key, s["trades"], f"{s['win_rate']:.1%}",
                     f"${s['net_pnl']:.2f}", f"{s['expectancy']:.4f}", f"{s['profit_factor']:.2f}",
                     f"{s.get('real_edge', 0):.4f}", f"{s.get('avg_slippage', 0):.4f}", now
                 ])
-
-            # Clear and Update
             self.stats_tab.clear()
-            self.stats_tab.append_row([
-                    "Metric_Type", "Key", "Trades", "WinRate", "NetPnL", "Expectancy", "ProfitFactor", "RealEdge", "AvgSlip", "LastUpdate"
-            ])
-            self.stats_tab.append_rows(rows)
-        except Exception as e:
-            self.logger.error(f"Error updating Stats tab: {e}")
+            self.stats_tab.append_row(["Metric_Type", "Key", "Trades", "WinRate", "NetPnL", "Expectancy", "ProfitFactor", "RealEdge", "AvgSlip", "LastUpdate"])
+            if rows: self.stats_tab.append_rows(rows)
 
     def get_performance_summary(self, data=None):
         """Calculates performance metrics grouped by score and global stats."""
@@ -428,6 +464,33 @@ class SheetsPersistence:
         except Exception as e:
             self.logger.error(f"Error reading BotMeta key {key}: {e}")
             return None
+
+    def persist_bans(self, banned_dict):
+        """Saves banned pairs to Sheets."""
+        if not self.ban_tab: return
+        try:
+            self.ban_tab.clear()
+            self.ban_tab.append_row(["Symbol", "BannedUntil"])
+            rows = [[s, t.strftime("%Y-%m-%d %H:%M:%S")] for s, t in banned_dict.items()]
+            if rows:
+                self.ban_tab.append_rows(rows)
+        except Exception as e:
+            self.logger.error(f"Error persisting bans: {e}")
+
+    def recover_bans(self):
+        """Recovers banned pairs from Sheets."""
+        if not self.ban_tab: return {}
+        try:
+            records = self.ban_tab.get_all_records()
+            banned = {}
+            for r in records:
+                try:
+                    banned[r['Symbol']] = datetime.strptime(r['BannedUntil'], "%Y-%m-%d %H:%M:%S")
+                except: continue
+            return banned
+        except Exception as e:
+            self.logger.error(f"Error recovering bans: {e}")
+            return {}
 
     def set_bot_meta(self, key, value):
         """Sets a specific metadata value."""

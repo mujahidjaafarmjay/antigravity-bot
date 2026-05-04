@@ -64,6 +64,7 @@ class TradingBot:
         logger.info("Recovering state from Google Sheets...")
         meta = self.sheets.get_meta()
         self.risk.peak_balance = meta.get('peak_balance', 0.0)
+        self.ranker.banned_until = self.sheets.recover_bans()
 
         # Daily PnL Reset Logic
         last_run_str = self.sheets.get_bot_meta("last_reset_date")
@@ -119,6 +120,10 @@ class TradingBot:
         rolling_perf = all_perf[-30:] if len(all_perf) > 30 else all_perf
         summary = self.sheets.get_performance_summary(rolling_perf)
 
+        # 3. Tier 8 Dashboard & Specialized Analytics
+        self.sheets.update_analytics_tabs(summary)
+        self.sheets.persist_bans(self.ranker.banned_until)
+
         if config.CALIBRATION_MODE:
             logger.info("Bot in CALIBRATION MODE. Tier 2 Engine (Optimizer/Ranker) suspended.")
             self.brain.set_disabled_scores(set())
@@ -127,9 +132,6 @@ class TradingBot:
             return
 
         logger.info("Running Tier 2 Strategy Optimization...")
-
-        # Update Analytics in Sheets
-        self.sheets.update_stats_tab(summary)
 
         # Dashboard Update
         current_bal = self.bybit.get_balance()
@@ -209,10 +211,16 @@ class TradingBot:
 
                     # Track Loss Streak for Kill Switch
                     self.risk.update_loss_streak(outcome)
-                    if self.risk.is_kill_switch_active(perf_summary):
+
+                    # Tier 8: Context-aware Kill Switch check
+                    all_perf = self.sheets.get_all_performance_data()
+                    rolling_perf = all_perf[-30:] if len(all_perf) > 30 else all_perf
+                    perf_summary = self.sheets.get_performance_summary(rolling_perf)
+
+                    if self.risk.is_kill_switch_active(perf_summary, self.daily_pnl):
                         logger.critical(f"🚨 SMART KILL SWITCH TRIGGERED: {self.risk.consecutive_losses} consecutive losses. Bot halting.")
                         self.is_halted = True
-                        self.telegram.alert_critical("Bot halted by Smart Kill Switch (3 consecutive losses).")
+                        self.telegram.alert_critical(f"Bot halted by Smart Kill Switch ({self.risk.consecutive_losses} consecutive losses).")
 
                     # Log to Sheets with High-Fidelity Data
                     slippage = abs(trade['entry'] - trade.get('expected_entry', trade['entry']))
@@ -251,7 +259,7 @@ class TradingBot:
                 # 1. Safety Checks
                 if self.is_halted:
                     # Check if Kill Switch can auto-recover
-                    if not self.risk.is_kill_switch_active(perf_summary):
+                    if not self.risk.is_kill_switch_active(perf_summary, self.daily_pnl):
                         logger.info("Bot auto-recovering from Smart Kill Switch...")
                         self.is_halted = False
                     else:
