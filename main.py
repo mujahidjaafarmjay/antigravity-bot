@@ -182,8 +182,13 @@ class TradingBot:
                             timeout_mins = 360 if atr_perc > 2.0 else 180 # 6h if volatile, 3h if stagnant
 
                             if duration_mins >= timeout_mins:
-                                outcome = "TIME_EXIT"
-                                logger.info(f"⌛ DEAD TRADE DETECTION: Closing {symbol} after {timeout_mins} mins.")
+                                # Tier 8: Don't kill slow winners
+                                gross_pnl = (current_price - trade['entry']) * trade['qty']
+                                if gross_pnl > 0:
+                                    logger.info(f"⌛ Slow Winner: {symbol} in profit, extending timeout.")
+                                else:
+                                    outcome = "TIME_EXIT"
+                                    logger.info(f"⌛ DEAD TRADE DETECTION: Closing {symbol} after {timeout_mins} mins.")
                         except: pass
 
                 if outcome:
@@ -283,9 +288,11 @@ class TradingBot:
                 # 2. Monitor Active Trades (TP/SL) - ALWAYS run this
                 self._monitor_active_trades()
 
-                # Tier 7: Daily Trade Frequency Control
-                if self.daily_trade_count >= self.risk.max_trades_per_day:
-                    logger.warning(f"Daily trade limit reached ({self.risk.max_trades_per_day}). Scanning paused.")
+                # Tier 7: Daily Trade Frequency Control (Adaptive)
+                # Recovery Mode: 2 trades/day | Growth Mode: 5 trades/day
+                max_daily = 2 if self.risk.in_recovery_mode else self.risk.max_trades_per_day
+                if self.daily_trade_count >= max_daily:
+                    logger.warning(f"Daily trade limit reached ({max_daily}). Scanning paused.")
                     time.sleep(3600)
                     continue
 

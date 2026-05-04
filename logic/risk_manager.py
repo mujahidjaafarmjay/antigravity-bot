@@ -114,8 +114,16 @@ class RiskManager:
         if session == "LONDON": session_mult = 1.2 # London is high conviction
         elif session == "ASIAN": session_mult = 0.7 # Asia is lower volatility/higher noise
 
-        # 5. Combined Weighting (Capped at 1.2x for account safety)
-        combined_mult = score_mult * symbol_weight * drawdown_mult * spread_mult * session_mult * compounding_mult
+        # 5. Global Execution Quality Guard
+        # If global real edge is low, reduce risk globally
+        exec_mult = 1.0
+        if performance_summary and "GLOBAL" in performance_summary:
+            g = performance_summary["GLOBAL"]
+            if g.get('real_edge', 0) < 0.0005: # < 5 bps real edge
+                exec_mult = 0.8
+
+        # 6. Combined Weighting (Capped at 1.2x for account safety)
+        combined_mult = score_mult * symbol_weight * drawdown_mult * spread_mult * session_mult * compounding_mult * exec_mult
         combined_mult = min(1.2, combined_mult)
 
         final_risk_percent = risk_percent * combined_mult
@@ -280,9 +288,9 @@ class RiskManager:
             if pf < 0.8: # Market is toxic if we're losing > 20% more than we win
                 return True
 
-        # 2. Real Edge Circuit Breaker
+        # 2. Real Edge Circuit Breaker (with -5 bps buffer)
         real_edge = g.get('real_edge', 0)
-        if real_edge < -0.001: # Circuit break if real net edge is negative (after fees/slip)
+        if real_edge < -0.0005: # -5 bps buffer to avoid noise
             return True
 
         return False
