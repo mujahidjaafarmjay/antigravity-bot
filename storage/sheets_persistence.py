@@ -438,12 +438,14 @@ class SheetsPersistence:
             avg_slippage = sum(s.get("slippages", [])) / s["trades"] if s["trades"] > 0 else 0
             net_pnl = s["gross_win_pnl"] - s["gross_loss_pnl"] - s["total_fees"]
 
-            # Tier 8: Standardized Institutional Execution Cost (bps)
-            # Formula: ((avg_slippage + round_trip_fees) * 10000)
-            # We assume avg_slippage is already a ratio (e.g. 0.001)
-            # Bybit Spot fee is 0.1% each side = 0.002 round trip
-            avg_fee_ratio = (s["total_fees"] / (s["trades"] * 40)) if s["trades"] > 0 else 0.002
-            real_edge = expectancy - (avg_slippage + avg_fee_ratio)
+            # Tier 9: Standardized Institutional Execution Cost (bps)
+            # Formula: ((avg_slippage + avg_spread + round_trip_fees) * 10000)
+            # avg_slippage is a ratio (e.g. 0.001 = 10 bps)
+            # round_trip_fees (Bybit) = 0.1% * 2 = 0.002
+            # avg_spread_ratio assumed from recent trades (0.001 default)
+            avg_spread_ratio = 0.001 # Default if not tracked per trade
+            exec_cost_ratio = avg_slippage + avg_spread_ratio + 0.002
+            real_edge = expectancy - exec_cost_ratio
 
             final_summary[key] = {
                 "score": key,

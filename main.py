@@ -219,7 +219,7 @@ class TradingBot:
                     if self.risk.is_kill_switch_active(perf_summary, self.daily_pnl):
                         logger.critical(f"🚨 SMART KILL SWITCH TRIGGERED: {self.risk.consecutive_losses} consecutive losses. Bot halting.")
                         self.is_halted = True
-                        self.telegram.alert_critical(f"Bot halted by Smart Kill Switch ({self.risk.consecutive_losses} consecutive losses).")
+                        self.telegram.alert_critical(f"🚨 SMART KILL SWITCH TRIGGERED: {self.risk.consecutive_losses} consecutive losses. Bot halting.")
 
                     # Log to Sheets with High-Fidelity Data
                     slippage = abs(trade['entry'] - trade.get('expected_entry', trade['entry']))
@@ -274,7 +274,7 @@ class TradingBot:
                 # Tier 4 Market Toxicity Check
                 if self.risk.is_market_toxic(perf_summary):
                     logger.critical("🚨 MARKET TOXIC: Total expectancy deeply negative. Pausing bot.")
-                    self.telegram.alert_critical("Bot paused: Market conditions are toxic (Negative Expectancy).")
+                    self.telegram.alert_critical("🚨 MARKET TOXIC: Total expectancy deeply negative. Pausing bot for 4 hours.")
                     time.sleep(3600 * 4) # Pause for 4 hours
                     continue
 
