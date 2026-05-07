@@ -206,7 +206,7 @@ class TelegramCommandHandler:
                 # Fix Bug: drop_pending_updates=True to avoid Conflict Error
                 await app.bot.delete_webhook(drop_pending_updates=True)
                 await app.start()
-                await app.updater.start_polling(drop_pending_updates=True, stop_signals=None)
+                await app.updater.start_polling(drop_pending_updates=True)
 
                 # Signal readiness to main.py
                 self.is_ready = True
