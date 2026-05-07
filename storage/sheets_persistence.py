@@ -551,6 +551,10 @@ class SheetsPersistence:
             self.meta_tab.update(range_name="B3", values=[[str(is_halted)]])
             if peak_balance > 0:
                 self.meta_tab.update(range_name="B4", values=[[str(peak_balance)]])
+            else:
+                # Default case to maintain structure
+                self.meta_tab.update(range_name="B4", values=[["0.0"]])
+
             if daily_trade_count >= 0:
                 self.meta_tab.update(range_name="B5", values=[[str(daily_trade_count)]])
             if last_trade_day:
