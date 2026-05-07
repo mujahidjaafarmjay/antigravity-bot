@@ -57,6 +57,8 @@ class TradingBot:
         self.active_trades = {} # Track open trades for P&L logging
         self.closed_trades_count = 0 # Counter to avoid aggressive optimization
         self.instance_id = datetime.now().strftime("%H%M%S") # Unique ID for this run
+        self.last_heartbeat = datetime.now(self.utc)
+        self.last_loop_start = datetime.now(self.utc)
         
     def _recover_state(self):
         """Recovers state and reconciles Sheets with Exchange reality."""
@@ -255,6 +257,22 @@ class TradingBot:
         
         while True:
             try:
+                self.last_loop_start = datetime.now(self.utc)
+
+                # Tier 9: Institutional Heartbeat (Every 30 mins)
+                now = datetime.now(self.utc)
+                if (now - self.last_heartbeat).total_seconds() >= 1800:
+                    balance = self.bybit.get_balance()
+                    drawdown = (self.risk.peak_balance - balance) / self.risk.peak_balance if self.risk.peak_balance > 0 else 0
+                    self.telegram.send_message(
+                        f"💓 <b>HEARTBEAT</b> (ID: {self.instance_id})\n"
+                        f"Status: ACTIVE\n"
+                        f"Balance: ${balance:.2f}\n"
+                        f"Drawdown: {drawdown:.2%}\n"
+                        f"Daily PnL: ${self.daily_pnl:.2f}"
+                    )
+                    self.last_heartbeat = now
+
                 # 1. Safety Checks
                 if self.is_halted:
                     # Check if Kill Switch can auto-recover
