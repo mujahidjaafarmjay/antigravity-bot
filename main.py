@@ -59,6 +59,8 @@ class TradingBot:
         self.instance_id = datetime.now().strftime("%H%M%S") # Unique ID for this run
         self.last_heartbeat = datetime.now(self.utc)
         self.last_loop_start = datetime.now(self.utc)
+        self.last_error_alert = 0.0 # Throttling
+        self.perf_summary = {} # Global state guard
         
     def _recover_state(self):
         """Recovers state and reconciles Sheets with Exchange reality."""
@@ -114,43 +116,49 @@ class TradingBot:
 
     def _run_optimization(self):
         """Fetches data and runs strategy optimizer and pair ranker (Respects CALIBRATION_MODE)."""
-        # 1. Fetch data
-        all_perf = self.sheets.get_all_performance_data()
+        try:
+            # 1. Fetch data
+            all_perf = self.sheets.get_all_performance_data()
 
-        # 2. Tier 6: Rolling Window Performance (Last 30 trades for adaptation)
-        rolling_perf = all_perf[-30:] if len(all_perf) > 30 else all_perf
-        summary = self.sheets.get_performance_summary(rolling_perf)
+            # 2. Tier 6: Rolling Window Performance (Last 30 trades for adaptation)
+            rolling_perf = all_perf[-30:] if len(all_perf) > 30 else all_perf
+            summary = self.sheets.get_performance_summary(rolling_perf)
 
-        # 3. Tier 8 Dashboard & Specialized Analytics
-        self.sheets.update_analytics_tabs(summary)
-        self.sheets.persist_bans(self.ranker.banned_until)
+            # 3. Tier 8 Dashboard & Specialized Analytics
+            self.sheets.update_analytics_tabs(summary)
+            self.sheets.persist_bans(self.ranker.banned_until)
 
-        if config.CALIBRATION_MODE:
-            logger.info("Bot in CALIBRATION MODE. Tier 2 Engine (Optimizer/Ranker) suspended.")
-            self.brain.set_disabled_scores(set())
-            # We still run ranker update to track data, but don't apply filters
+            if config.CALIBRATION_MODE:
+                logger.info("Bot in CALIBRATION MODE. Tier 2 Engine (Optimizer/Ranker) suspended.")
+                self.brain.set_disabled_scores(set())
+                # We still run ranker update to track data, but don't apply filters
+                self.ranker.update_rankings(all_perf)
+                return summary
+
+            logger.info("Running Tier 2 Strategy Optimization...")
+
+            # Dashboard Update
+            current_bal = self.bybit.get_balance()
+            drawdown = (self.risk.peak_balance - current_bal) / self.risk.peak_balance if self.risk.peak_balance > 0 else 0
+            self.sheets.update_dashboard(summary, drawdown, self.risk.in_recovery_mode, current_bal, self.risk.peak_balance)
+
+            # 1. Score-Level Optimization
+            disabled = self.optimizer.analyze_and_optimize(summary)
+
+            if disabled:
+                logger.warning(f"Strategy Optimizer has DISABLED scores: {disabled}")
+                self.telegram.send_message(f"🔄 <b>Strategy Optimized</b>\nDisabled Scores: {list(disabled)}")
+
+            # Pass disabled scores to brain
+            self.brain.set_disabled_scores(disabled)
+
+            # 2. Symbol-Level Ranking
             self.ranker.update_rankings(all_perf)
-            return
 
-        logger.info("Running Tier 2 Strategy Optimization...")
-
-        # Dashboard Update
-        current_bal = self.bybit.get_balance()
-        drawdown = (self.risk.peak_balance - current_bal) / self.risk.peak_balance if self.risk.peak_balance > 0 else 0
-        self.sheets.update_dashboard(summary, drawdown, self.risk.in_recovery_mode, current_bal, self.risk.peak_balance)
-
-        # 1. Score-Level Optimization
-        disabled = self.optimizer.analyze_and_optimize(summary)
-
-        if disabled:
-            logger.warning(f"Strategy Optimizer has DISABLED scores: {disabled}")
-            self.telegram.send_message(f"🔄 <b>Strategy Optimized</b>\nDisabled Scores: {list(disabled)}")
-
-        # Pass disabled scores to brain
-        self.brain.set_disabled_scores(disabled)
-
-        # 2. Symbol-Level Ranking
-        self.ranker.update_rankings(all_perf)
+            return summary
+        except Exception as e:
+            logger.error(f"Error during optimization cycle: {e}")
+            return {}
 
     def _monitor_active_trades(self):
         """Checks if active trades hit TP or SL."""
@@ -213,12 +221,8 @@ class TradingBot:
                     # Track Loss Streak for Kill Switch
                     self.risk.update_loss_streak(outcome)
 
-                    # Tier 8: Context-aware Kill Switch check
-                    all_perf_data = self.sheets.get_all_performance_data()
-                    rolling_perf_window = all_perf_data[-30:] if len(all_perf_data) > 30 else all_perf_data
-                    perf_summary_snap = self.sheets.get_performance_summary(rolling_perf_window)
-
-                    if self.risk.is_kill_switch_active(perf_summary_snap, self.daily_pnl):
+                    # Tier 8: Context-aware Kill Switch check (Uses unified performance state)
+                    if self.risk.is_kill_switch_active(self.perf_summary, self.daily_pnl):
                         logger.critical(f"🚨 SMART KILL SWITCH TRIGGERED: {self.risk.consecutive_losses} consecutive losses. Bot halting.")
                         self.is_halted = True
                         self.telegram.alert_critical(f"🚨 SMART KILL SWITCH TRIGGERED: {self.risk.consecutive_losses} consecutive losses. Bot halting.")
@@ -259,6 +263,9 @@ class TradingBot:
             try:
                 self.last_loop_start = datetime.now(self.utc)
 
+                # 0. Global Performance Sync
+                self.perf_summary = self._run_optimization() or self.perf_summary
+
                 # Tier 9: Institutional Heartbeat (Every 30 mins)
                 now = datetime.now(self.utc)
                 if (now - self.last_heartbeat).total_seconds() >= 1800:
@@ -275,10 +282,8 @@ class TradingBot:
 
                 # 1. Safety Checks (Institutional Gate)
                 if self.is_halted:
-                    # Use a fallback if recovery hasn't run yet
-                    perf_snap = locals().get('perf_summary_main', {})
                     # Check if Kill Switch can auto-recover
-                    if not self.risk.is_kill_switch_active(perf_snap, self.daily_pnl):
+                    if not self.risk.is_kill_switch_active(self.perf_summary, self.daily_pnl):
                         logger.info("Bot auto-recovering from Smart Kill Switch...")
                         self.is_halted = False
                     else:
@@ -286,13 +291,8 @@ class TradingBot:
                         time.sleep(3600) # Check every hour
                         continue
 
-                # 1.5 Fetch Performance Snapshot (Tier 6 Rolling Window)
-                all_perf_main = self.sheets.get_all_performance_data()
-                rolling_perf_main = all_perf_main[-30:] if len(all_perf_main) > 30 else all_perf_main
-                perf_summary_main = self.sheets.get_performance_summary(rolling_perf_main)
-
                 # Tier 4 Market Toxicity Check
-                if self.risk.is_market_toxic(perf_summary_main):
+                if self.risk.is_market_toxic(self.perf_summary):
                     logger.critical("🚨 MARKET TOXIC: Total expectancy deeply negative. Pausing bot.")
                     self.telegram.alert_critical("🚨 MARKET TOXIC: Total expectancy deeply negative. Pausing bot for 4 hours.")
                     time.sleep(3600 * 4) # Pause for 4 hours
@@ -301,7 +301,7 @@ class TradingBot:
                 balance = self.bybit.get_balance()
 
                 # Check Real Edge for Recovery Exit
-                g = perf_summary.get("GLOBAL", {})
+                g = self.perf_summary.get("GLOBAL", {})
                 real_edge_val = g.get('real_edge', 0)
 
                 self.risk.update_peak_balance(balance)
@@ -412,7 +412,7 @@ class TradingBot:
 
                     if decision['action'] in ["BUY", "STRONG BUY"]:
                         # Tier 4 Equity Protection Check (Uses cached snapshot)
-                        if self.risk.is_equity_under_pressure(perf_summary_main):
+                        if self.risk.is_equity_under_pressure(self.perf_summary):
                             logger.warning(f"⚠️ Equity Protection: Recent PF < {config.EQUITY_PROTECT_THRESHOLD}. Skipping {symbol}.")
                             self.telegram.send_message(f"⚠️ <b>Equity Guard:</b> Skipping {symbol} due to recent performance pressure.")
                             continue
@@ -475,7 +475,7 @@ class TradingBot:
                                 decision['stop_loss'],
                                 score=decision['score'],
                                 symbol_weight=symbol_weight,
-                                performance_summary=perf_summary_main,
+                                performance_summary=self.perf_summary,
                                 spread=spread_val,
                                 session=session
                             )
@@ -595,9 +595,15 @@ class TradingBot:
             except Exception as e:
                 err_msg = f"Unexpected error in main loop: {e}"
                 logger.exception(err_msg)
-                try:
-                    self.telegram.send_message(f"🚨 <b>MAIN LOOP CRASH</b>\n{err_msg}")
-                except: pass
+
+                # Tier 9: Throttled Telegram Error Alerts
+                now_t = time.time()
+                if now_t - self.last_error_alert > 300: # 5 minute cooldown
+                    try:
+                        self.telegram.send_message(f"🚨 <b>MAIN LOOP CRASH</b>\n{err_msg}")
+                        self.last_error_alert = now_t
+                    except: pass
+
                 time.sleep(15) # Quick recovery
 
 if __name__ == "__main__":
