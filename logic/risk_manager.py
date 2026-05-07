@@ -118,7 +118,7 @@ class RiskManager:
         if session == "LONDON": session_mult = 1.2 # London is high conviction
         elif session == "ASIAN": session_mult = 0.7 # Asia is lower volatility/higher noise
 
-        # 5. Global Execution Quality Guard (Tier 8 Upgrade)
+        # 5. Global Execution Quality Guard (Tier 9 Upgrade)
         # Smooth scaling based on Real Edge
         exec_mult = 1.0
         if performance_summary and "GLOBAL" in performance_summary:
@@ -126,6 +126,7 @@ class RiskManager:
             edge = g.get('real_edge', 0)
             if edge < 0.0005: exec_mult = 0.8 # < 5 bps
             elif edge < 0.0010: exec_mult = 0.9 # < 10 bps
+            elif edge < 0: exec_mult = 0.5 # Negative Real Edge
 
         exec_mult = max(0.5, exec_mult) # Institutional Floor
 
