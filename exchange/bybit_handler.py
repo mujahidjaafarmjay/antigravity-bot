@@ -204,15 +204,18 @@ class BybitHandler:
                 params["stopLoss"] = self._to_str(sl_val, info["price_step"])
                 params["slOrderType"] = "Market"
 
+            start_t = time.time()
             res = self.session.place_order(**params)
-            self.logger.info(f"BYBIT RAW RESPONSE: {res}")
+            latency_ms = int((time.time() - start_t) * 1000)
+            self.logger.info(f"BYBIT RAW RESPONSE: {res} | Latency: {latency_ms}ms")
 
             if res.get("retCode") == 0:
                 return {
                     "success": True,
                     "order_id": res['result']['orderId'],
                     "price": price,
-                    "qty": qty_val
+                    "qty": qty_val,
+                    "latency": latency_ms
                 }
             else:
                 return {

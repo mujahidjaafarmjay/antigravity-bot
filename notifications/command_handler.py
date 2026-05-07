@@ -27,6 +27,7 @@ class TelegramCommandHandler:
         self.bybit     = bybit
         self.risk      = risk            # Fix Bug 7
         self.paused    = self._load_pause_state()  # safe now — storage exists
+        self.is_ready  = False
 
         self.scan_requested     = False
         self.backtest_requested = False
@@ -206,6 +207,10 @@ class TelegramCommandHandler:
                 await app.bot.delete_webhook(drop_pending_updates=True)
                 await app.start()
                 await app.updater.start_polling(drop_pending_updates=True, stop_signals=None)
+
+                # Signal readiness to main.py
+                self.is_ready = True
+
                 while True:
                     await asyncio.sleep(3600)
             except Exception as e:

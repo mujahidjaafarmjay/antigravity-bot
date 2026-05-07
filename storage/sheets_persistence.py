@@ -340,6 +340,16 @@ class SheetsPersistence:
             self.score_tab.append_row(["Score", "Trades", "Wins", "Losses", "WinRate", "AvgWin", "AvgLoss", "Expectancy", "Status"])
             if rows: self.score_tab.append_rows(rows)
 
+        # 1.5 Session Analytics (Tier 9 Upgrade)
+        if self.session_tab:
+            rows = []
+            for key in sorted([k for k in summary.keys() if isinstance(k, str) and k != "GLOBAL"]):
+                s = summary[key]
+                rows.append([key, s['trades'], f"{s['win_rate']:.1%}", f"{s.get('avg_slippage', 0)*10000:.1f} bps", f"{s['expectancy']:.4f}"])
+            self.session_tab.clear()
+            self.session_tab.append_row(["Session", "Trades", "WinRate", "AvgSlip", "Expectancy"])
+            if rows: self.session_tab.append_rows(rows)
+
         # 2. Stats (Unified view)
         if self.stats_tab:
             rows = []
@@ -349,7 +359,7 @@ class SheetsPersistence:
                 rows.append([
                     metric_type, key, s["trades"], f"{s['win_rate']:.1%}",
                     f"${s['net_pnl']:.2f}", f"{s['expectancy']:.4f}", f"{s['profit_factor']:.2f}",
-                    f"{s.get('real_edge', 0):.4f}", f"{s.get('avg_slippage', 0):.4f}", now
+                    f"{s.get('real_edge', 0)*10000:.1f} bps", f"{s.get('avg_slippage', 0)*10000:.1f} bps", now
                 ])
             self.stats_tab.clear()
             self.stats_tab.append_row(["Metric_Type", "Key", "Trades", "WinRate", "NetPnL", "Expectancy", "ProfitFactor", "RealEdge", "AvgSlip", "LastUpdate"])
@@ -407,6 +417,25 @@ class SheetsPersistence:
                 g["net_pnl"] += pnl
                 if "slippages" not in g: g["slippages"] = []
                 g["slippages"].append(slippage)
+
+                # Tier 9: Update Session Stats
+                sess_key = row.get('Session', 'ASIAN')
+                if sess_key not in summary:
+                    summary[sess_key] = {
+                        "trades": 0, "wins": 0, "losses": 0,
+                        "gross_win_pnl": 0.0, "gross_loss_pnl": 0.0,
+                        "total_fees": 0.0, "win_amounts": [], "loss_amounts": [], "slippages": []
+                    }
+                ss = summary[sess_key]
+                ss["trades"] += 1
+                ss["total_fees"] += fees
+                ss["slippages"].append(slippage)
+                if outcome.upper() == "WIN":
+                    ss["wins"] += 1
+                    ss["gross_win_pnl"] += pnl
+                elif outcome.upper() == "LOSS":
+                    ss["losses"] += 1
+                    ss["gross_loss_pnl"] += abs(pnl)
 
                 if outcome.upper() == "WIN":
                     s["wins"] += 1
