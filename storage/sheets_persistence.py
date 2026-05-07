@@ -144,7 +144,7 @@ class SheetsPersistence:
                 self.meta_tab = self.sheet.worksheet("BotMeta")
             except gspread.WorksheetNotFound:
                 self.meta_tab = self.sheet.add_worksheet("BotMeta", rows=100, cols=2)
-                self.meta_tab.update("A1:B4", [
+                self.meta_tab.update(range_name="A1:B7", values=[
                     ["Key", "Value"],
                     ["daily_net_pnl", "0.0"],
                     ["is_halted", "False"],
@@ -333,9 +333,11 @@ class SheetsPersistence:
             rows = []
             for k in sorted([x for x in summary.keys() if isinstance(x, int)]):
                 s = summary[k]
-                status = "✅ ACTIVE" if s['expectancy'] > 0 else "❌ DISABLED"
-                rows.append([k, s['trades'], s['wins'], s['losses'], f"{s['win_rate']:.1%}",
-                             f"${s['avg_win']:.2f}", f"${s['avg_loss']:.2f}", f"{s['expectancy']:.4f}", status])
+                status = "✅ ACTIVE" if s.get('expectancy', 0) > 0 else "❌ DISABLED"
+                rows.append([k, s.get('trades', 0), s.get('wins', 0), s.get('losses', 0),
+                             f"{s.get('win_rate', 0):.1%}",
+                             f"${s.get('avg_win', 0):.2f}", f"${s.get('avg_loss', 0):.2f}",
+                             f"{s.get('expectancy', 0):.4f}", status])
             self.score_tab.clear()
             self.score_tab.append_row(["Score", "Trades", "Wins", "Losses", "WinRate", "AvgWin", "AvgLoss", "Expectancy", "Status"])
             if rows: self.score_tab.append_rows(rows)
@@ -345,7 +347,7 @@ class SheetsPersistence:
             rows = []
             for key in sorted([k for k in summary.keys() if isinstance(k, str) and k != "GLOBAL"]):
                 s = summary[key]
-                rows.append([key, s['trades'], f"{s['win_rate']:.1%}", f"{s.get('avg_slippage', 0)*10000:.1f} bps", f"{s['expectancy']:.4f}"])
+                rows.append([key, s.get('trades', 0), f"{s.get('win_rate', 0):.1%}", f"{s.get('avg_slippage', 0)*10000:.1f} bps", f"{s.get('expectancy', 0):.4f}"])
             self.session_tab.clear()
             self.session_tab.append_row(["Session", "Trades", "WinRate", "AvgSlip", "Expectancy"])
             if rows: self.session_tab.append_rows(rows)
@@ -357,8 +359,8 @@ class SheetsPersistence:
                 s = summary[key]
                 metric_type = "GLOBAL" if key == "GLOBAL" else "SCORE"
                 rows.append([
-                    metric_type, key, s["trades"], f"{s['win_rate']:.1%}",
-                    f"${s['net_pnl']:.2f}", f"{s['expectancy']:.4f}", f"{s['profit_factor']:.2f}",
+                    metric_type, key, s.get('trades', 0), f"{s.get('win_rate', 0):.1%}",
+                    f"${s.get('net_pnl', 0):.2f}", f"{s.get('expectancy', 0):.4f}", f"{s.get('profit_factor', 0):.2f}",
                     f"{s.get('real_edge', 0)*10000:.1f} bps", f"{s.get('avg_slippage', 0)*10000:.1f} bps", now
                 ])
             self.stats_tab.clear()
@@ -419,7 +421,7 @@ class SheetsPersistence:
                 g["slippages"].append(slippage)
 
                 # Tier 9: Update Session Stats
-                sess_key = row.get('Session', 'ASIAN')
+                sess_key = str(row.get('Session', 'ASIAN'))
                 if sess_key not in summary:
                     summary[sess_key] = {
                         "trades": 0, "wins": 0, "losses": 0,
@@ -458,21 +460,16 @@ class SheetsPersistence:
         # Finalize calculations
         final_summary = {}
         for key, s in summary.items():
-            win_rate = s["wins"] / s["trades"] if s["trades"] > 0 else 0
-            avg_win = s["gross_win_pnl"] / s["wins"] if s["wins"] > 0 else 0.0
-            avg_loss = s["gross_loss_pnl"] / s["losses"] if s["losses"] > 0 else 0.0
+            win_rate = s.get("wins", 0) / s["trades"] if s["trades"] > 0 else 0
+            avg_win = s.get("gross_win_pnl", 0) / s.get("wins", 1) if s.get("wins", 0) > 0 else 0.0
+            avg_loss = s.get("gross_loss_pnl", 0) / s.get("losses", 1) if s.get("losses", 0) > 0 else 0.0
             expectancy = (win_rate * avg_win) - ((1 - win_rate) * avg_loss)
-            profit_factor = s["gross_win_pnl"] / s["gross_loss_pnl"] if s["gross_loss_pnl"] > 0 else (float('inf') if s["gross_win_pnl"] > 0 else 1.0)
+            profit_factor = s.get("gross_win_pnl", 0) / s.get("gross_loss_pnl", 1) if s.get("gross_loss_pnl", 0) > 0 else (float('inf') if s.get("gross_win_pnl", 0) > 0 else 1.0)
 
             avg_slippage = sum(s.get("slippages", [])) / s["trades"] if s["trades"] > 0 else 0
-            net_pnl = s["gross_win_pnl"] - s["gross_loss_pnl"] - s["total_fees"]
+            net_pnl = s.get("gross_win_pnl", 0) - s.get("gross_loss_pnl", 0) - s.get("total_fees", 0)
 
-            # Tier 9: Standardized Institutional Execution Cost (bps)
-            # Formula: ((avg_slippage + avg_spread + round_trip_fees) * 10000)
-            # avg_slippage is a ratio (e.g. 0.001 = 10 bps)
-            # round_trip_fees (Bybit) = 0.1% * 2 = 0.002
-            # avg_spread_ratio assumed from recent trades (0.001 default)
-            avg_spread_ratio = 0.001 # Default if not tracked per trade
+            avg_spread_ratio = 0.001
             exec_cost_ratio = avg_slippage + avg_spread_ratio + 0.002
             real_edge = expectancy - exec_cost_ratio
 
@@ -487,8 +484,8 @@ class SheetsPersistence:
                 "profit_factor": profit_factor,
                 "avg_win": avg_win,
                 "avg_loss": avg_loss,
-                "gross_win_pnl": s["gross_win_pnl"],
-                "gross_loss_pnl": s["gross_loss_pnl"]
+                "gross_win_pnl": s.get("gross_win_pnl", 0),
+                "gross_loss_pnl": s.get("gross_loss_pnl", 0)
             }
 
         return final_summary
@@ -547,18 +544,18 @@ class SheetsPersistence:
             self.logger.error(f"Error setting BotMeta key {key}: {e}")
 
     def update_meta(self, daily_pnl, is_halted, peak_balance=0.0, daily_trade_count=0, last_trade_day=""):
-        """Updates bot metadata."""
+        """Updates bot metadata using gspread v6 range updates."""
         if not self.meta_tab: return
         try:
-            self.meta_tab.update("B2", str(daily_pnl))
-            self.meta_tab.update("B3", str(is_halted))
+            self.meta_tab.update(range_name="B2", values=[[str(daily_pnl)]])
+            self.meta_tab.update(range_name="B3", values=[[str(is_halted)]])
             if peak_balance > 0:
-                self.meta_tab.update("B4", str(peak_balance))
+                self.meta_tab.update(range_name="B4", values=[[str(peak_balance)]])
             if daily_trade_count >= 0:
-                self.meta_tab.update("B5", str(daily_trade_count))
+                self.meta_tab.update(range_name="B5", values=[[str(daily_trade_count)]])
             if last_trade_day:
-                self.meta_tab.update("B6", str(last_trade_day))
-            self.meta_tab.update("B7", datetime.now().strftime("%Y-%m-%d %H:%M:%S"))
+                self.meta_tab.update(range_name="B6", values=[[str(last_trade_day)]])
+            self.meta_tab.update(range_name="B7", values=[[datetime.now().strftime("%Y-%m-%d %H:%M:%S")]])
         except Exception as e:
             self.logger.error(f"Error updating BotMeta: {e}")
 

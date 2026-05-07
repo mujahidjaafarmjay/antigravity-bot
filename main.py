@@ -214,11 +214,11 @@ class TradingBot:
                     self.risk.update_loss_streak(outcome)
 
                     # Tier 8: Context-aware Kill Switch check
-                    all_perf = self.sheets.get_all_performance_data()
-                    rolling_perf = all_perf[-30:] if len(all_perf) > 30 else all_perf
-                    perf_summary = self.sheets.get_performance_summary(rolling_perf)
+                    all_perf_data = self.sheets.get_all_performance_data()
+                    rolling_perf_window = all_perf_data[-30:] if len(all_perf_data) > 30 else all_perf_data
+                    perf_summary_snap = self.sheets.get_performance_summary(rolling_perf_window)
 
-                    if self.risk.is_kill_switch_active(perf_summary, self.daily_pnl):
+                    if self.risk.is_kill_switch_active(perf_summary_snap, self.daily_pnl):
                         logger.critical(f"🚨 SMART KILL SWITCH TRIGGERED: {self.risk.consecutive_losses} consecutive losses. Bot halting.")
                         self.is_halted = True
                         self.telegram.alert_critical(f"🚨 SMART KILL SWITCH TRIGGERED: {self.risk.consecutive_losses} consecutive losses. Bot halting.")
@@ -276,7 +276,7 @@ class TradingBot:
                 # 1. Safety Checks
                 if self.is_halted:
                     # Check if Kill Switch can auto-recover
-                    if not self.risk.is_kill_switch_active(perf_summary, self.daily_pnl):
+                    if not self.risk.is_kill_switch_active(perf_summary_main, self.daily_pnl):
                         logger.info("Bot auto-recovering from Smart Kill Switch...")
                         self.is_halted = False
                     else:
@@ -285,12 +285,12 @@ class TradingBot:
                         continue
 
                 # 1.5 Fetch Performance Snapshot (Tier 6 Rolling Window)
-                all_perf = self.sheets.get_all_performance_data()
-                rolling_perf = all_perf[-30:] if len(all_perf) > 30 else all_perf
-                perf_summary = self.sheets.get_performance_summary(rolling_perf)
+                all_perf_main = self.sheets.get_all_performance_data()
+                rolling_perf_main = all_perf_main[-30:] if len(all_perf_main) > 30 else all_perf_main
+                perf_summary_main = self.sheets.get_performance_summary(rolling_perf_main)
 
                 # Tier 4 Market Toxicity Check
-                if self.risk.is_market_toxic(perf_summary):
+                if self.risk.is_market_toxic(perf_summary_main):
                     logger.critical("🚨 MARKET TOXIC: Total expectancy deeply negative. Pausing bot.")
                     self.telegram.alert_critical("🚨 MARKET TOXIC: Total expectancy deeply negative. Pausing bot for 4 hours.")
                     time.sleep(3600 * 4) # Pause for 4 hours
@@ -410,7 +410,7 @@ class TradingBot:
 
                     if decision['action'] in ["BUY", "STRONG BUY"]:
                         # Tier 4 Equity Protection Check (Uses cached snapshot)
-                        if self.risk.is_equity_under_pressure(perf_summary):
+                        if self.risk.is_equity_under_pressure(perf_summary_main):
                             logger.warning(f"⚠️ Equity Protection: Recent PF < {config.EQUITY_PROTECT_THRESHOLD}. Skipping {symbol}.")
                             self.telegram.send_message(f"⚠️ <b>Equity Guard:</b> Skipping {symbol} due to recent performance pressure.")
                             continue
@@ -473,7 +473,7 @@ class TradingBot:
                                 decision['stop_loss'],
                                 score=decision['score'],
                                 symbol_weight=symbol_weight,
-                                performance_summary=perf_summary,
+                                performance_summary=perf_summary_main,
                                 spread=spread_val,
                                 session=session
                             )
@@ -613,9 +613,12 @@ if __name__ == "__main__":
         
     threading.Thread(target=start_telegram, daemon=True).start()
     
-    # 3. Perform Heavy State Recovery
-    logger.info("Starting institutional state recovery...")
-    bot._recover_state()
+    # 3. Perform Heavy State Recovery (Wrapped for stability)
+    try:
+        logger.info("Starting institutional state recovery...")
+        bot._recover_state()
+    except Exception as e:
+        logger.exception(f"CRITICAL: Recovery failed: {e}. Starting with fresh state.")
 
     # 4. Final Milestone: Enter Main Loop
     logger.info("Bot components initialized and state recovered. Entering Main Engine Loop.")
