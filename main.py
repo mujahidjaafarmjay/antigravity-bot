@@ -252,7 +252,7 @@ class TradingBot:
                 logger.error(f"Error monitoring {symbol}: {e}")
 
     def run(self):
-        """Main bot loop."""
+        """Main bot loop with institutional stability wrapping."""
         logger.info("Antigravity Spot Bot Started.")
         
         while True:
@@ -273,10 +273,12 @@ class TradingBot:
                     )
                     self.last_heartbeat = now
 
-                # 1. Safety Checks
+                # 1. Safety Checks (Institutional Gate)
                 if self.is_halted:
+                    # Use a fallback if recovery hasn't run yet
+                    perf_snap = locals().get('perf_summary_main', {})
                     # Check if Kill Switch can auto-recover
-                    if not self.risk.is_kill_switch_active(perf_summary_main, self.daily_pnl):
+                    if not self.risk.is_kill_switch_active(perf_snap, self.daily_pnl):
                         logger.info("Bot auto-recovering from Smart Kill Switch...")
                         self.is_halted = False
                     else:
@@ -592,9 +594,11 @@ class TradingBot:
 
             except Exception as e:
                 err_msg = f"Unexpected error in main loop: {e}"
-                logger.error(err_msg)
-                self.telegram.send_message(f"🚨 <b>BOT ERROR</b>\n{err_msg}")
-                time.sleep(30)
+                logger.exception(err_msg)
+                try:
+                    self.telegram.send_message(f"🚨 <b>MAIN LOOP CRASH</b>\n{err_msg}")
+                except: pass
+                time.sleep(15) # Quick recovery
 
 if __name__ == "__main__":
     # Start Flask heartbeat in background
