@@ -156,10 +156,12 @@ class RiskManager:
         if actual_notional > max_notional:
             qty = max_notional / entry_price
         # 5. Min Position Size Constraint (Bybit requires ~$5 minimum notional)
-        if (qty * entry_price) < config.MIN_TRADE_USDT:
+        # Tier 9: Hard Institutional Floor
+        actual_notional = qty * entry_price
+        if actual_notional < 5.0:
             return 0, "SMALL_TRADE_WATCH"
             
-        return round(qty, 6), "OK"
+        return round(qty, 8), "OK"
 
     def validate_trade(self, decision, balance, current_open_trades, bid, ask):
         """

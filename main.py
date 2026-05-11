@@ -322,11 +322,15 @@ class TradingBot:
                     shadow_wins = len([s for s in self.active_shadow_trades.values() if s.get('outcome') == "V_WIN"])
                     shadow_losses = len([s for s in self.active_shadow_trades.values() if s.get('outcome') == "V_LOSS"])
 
+                    # Tier 9: Detect active threshold
+                    threshold = 4.0 if self.risk.in_recovery_mode else 3.0
+                    if config.CALIBRATION_MODE: threshold = 3.0
+
                     self.telegram.send_message(
                         f"💓 <b>SYSTEM HEALTH REPORT</b>\n"
                         f"━━━━━━━━━━━━━━━\n"
                         f"<b>ID:</b> {self.instance_id}\n"
-                        f"<b>Mode:</b> {'RECOVERY' if self.risk.in_recovery_mode else 'GROWTH'}\n"
+                        f"<b>Mode:</b> {'RECOVERY' if self.risk.in_recovery_mode else 'GROWTH'} (Min: {threshold})\n"
                         f"<b>Balance:</b> ${balance:.2f} (DD: {drawdown:.2%})\n"
                         f"<b>Daily PnL:</b> ${self.daily_pnl:.2f}\n"
                         f"<b>Active Trades:</b> {len(self.active_trades)}\n"
@@ -368,7 +372,7 @@ class TradingBot:
                 # Recovery Mode Alerts
                 if self.risk.in_recovery_mode != self.last_recovery_state:
                     if self.risk.in_recovery_mode:
-                        self.telegram.send_message("⚠️ <b>RECOVERY MODE ACTIVATED</b>\nSelectivity increased (Score 5+), Risk halved.")
+                        self.telegram.send_message("⚠️ <b>RECOVERY MODE ACTIVATED</b>\nSelectivity increased (Score 4+), Risk halved.")
                     else:
                         self.telegram.send_message("✅ <b>RECOVERY MODE EXITED</b>\nGrowth parameters restored.")
                     self.last_recovery_state = self.risk.in_recovery_mode

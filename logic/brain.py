@@ -83,26 +83,24 @@ class Brain:
 
         trend_ok = current_ma50 > current_ma200
 
-        # 2. Weighted Scoring System
-        score = 0
+        # 2. Weighted Confidence Scoring (Tier 9: Higher Resolution)
+        score = 0.0
         reasons = []
 
-        # Near Order Block (Support Zone)
-        # Look for the lowest low in the last 10 CLOSED candles
+        # Near Order Block (Core Signal)
         recent_df = df.iloc[-config.OB_WINDOW-1:-1]
         support_zone = recent_df['low'].min()
         current_price = df['close'].iloc[-2]
-        
-        # Check if current price is within 2% of the support zone (using abs as per user request)
         distance_to_ob = abs(current_price - support_zone) / current_price
-        near_ob = distance_to_ob <= 0.02
-        if near_ob:
-            score += 2
-            reasons.append(f"Near Order Block (+2, dist: {distance_to_ob:.2%})")
+
+        if distance_to_ob <= 0.01:
+            score += 2.5
+            reasons.append(f"Primary OB (+2.5, dist: {distance_to_ob:.2%})")
+        elif distance_to_ob <= 0.02:
+            score += 1.5
+            reasons.append(f"Secondary OB (+1.5, dist: {distance_to_ob:.2%})")
 
         # Fair Value Gap (Imbalance)
-        # FVG is when high of candle 1 < low of candle 3 (for bullish)
-        # We look at the last few candles
         fvg_detected = False
         for i in range(len(df) - config.FVG_WINDOW - 1, len(df) - 2):
             if df['high'].iloc[i-2] < df['low'].iloc[i]:
@@ -110,27 +108,35 @@ class Brain:
                 break
         
         if fvg_detected:
-            score += 2
-            reasons.append("Fair Value Gap Detected (+2)")
+            score += 2.0
+            reasons.append("FVG Imbalance (+2.0)")
 
-        # Volume Surge
+        # Volume Surge (Momentum)
         avg_volume = df['volume'].rolling(window=config.VOL_WINDOW).mean().iloc[-2]
         current_volume = df['volume'].iloc[-2]
-        volume_ok = current_volume > config.VOL_MULTIPLIER * avg_volume
-        if volume_ok:
-            score += 1
-            reasons.append(f"Volume Surge (+1, x{current_volume/avg_volume:.2f})")
+        vol_ratio = current_volume / avg_volume if avg_volume > 0 else 1.0
+        if vol_ratio > 2.0:
+            score += 1.5
+            reasons.append(f"Extreme Vol Surge (+1.5, x{vol_ratio:.2f})")
+        elif vol_ratio > 1.2:
+            score += 1.0
+            reasons.append(f"Vol Surge (+1.0, x{vol_ratio:.2f})")
 
-        # Session Boost (Optional/Simplified: Check if price action is expanding)
-        # We'll use a simple volatility expansion check as a proxy for session boost
+        # Volatility Expansion
         atr = self._calculate_atr(df)
-        volatility_boost = df['high'].iloc[-2] - df['low'].iloc[-2] > atr
-        if volatility_boost:
-            score += 1
-            reasons.append("Volatility Expansion Boost (+1)")
+        body_size = abs(df['close'].iloc[-2] - df['open'].iloc[-2])
+        if body_size > (atr * 1.5):
+            score += 1.0
+            reasons.append("High Vol Displacement (+1.0)")
+        elif body_size > atr:
+            score += 0.5
+            reasons.append("Vol Expansion (+0.5)")
+
+        # Final Rounding for action mapping
+        display_score = round(score, 1)
 
         # Debug Output (Critical Fix #5)
-        print(f"DEBUG: {symbol} | Trend:{trend_ok} | OB:{near_ob} | FVG:{fvg_detected} | Vol:{volume_ok} | Score:{score}")
+        print(f"DEBUG: {symbol} | Trend:{trend_ok} | OB dist:{distance_to_ob:.2%} | FVG:{fvg_detected} | Score:{display_score}")
 
         # 3. Decision Making
         if not trend_ok:
@@ -149,13 +155,13 @@ class Brain:
             # Tier 5 Regime Filter: Protect capital during bearish/unknown markets
             threshold = config.SCORE_THRESHOLD if market_trend == "bullish" else 5
 
-        if score in self.disabled_scores:
+        if display_score in self.disabled_scores:
             action = "HOLD (DISABLED BY OPTIMIZER)"
-        elif score >= threshold + 1:
+        elif display_score >= threshold + 1:
             action = "STRONG BUY"
-        elif score >= threshold:
+        elif display_score >= threshold:
             action = "BUY"
-        elif score >= 2:
+        elif display_score >= 2:
             action = "WATCH"
 
         # 4. SL/TP Calculation (Handled by Risk Manager, but we provide base values)
@@ -166,7 +172,7 @@ class Brain:
         return {
             "symbol": symbol,
             "action": action,
-            "score": score,
+            "score": display_score,
             "entry": current_price,
             "stop_loss": stop_loss,
             "take_profit": take_profit,
