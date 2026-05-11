@@ -39,7 +39,8 @@ class TradingBot:
         self.bybit = BybitHandler()
         self.brain = Brain()
         self.risk = RiskManager()
-        self.optimizer = StrategyOptimizer(min_trades_required=10) # Tier 5: Faster adaptation
+        # Rule: Minimum 50 trades for meaningful calibration
+        self.optimizer = StrategyOptimizer(min_trades_required=50)
         self.ranker = PairRanker(min_trades_required=5)
         self.sheets = SheetsPersistence()
         self.telegram = TelegramSender()

@@ -22,9 +22,11 @@ class RiskManager:
         Scales risk based on proven statistical edge.
         """
         # 1. Check if we have data-driven weights (Institutional tier)
+        # Rule: Do not modify thresholds until a statistically significant sample size is reached.
+        # Minimal meaningful calibration: 30+ real trades per score tier.
         if performance_summary and score in performance_summary:
             stats = performance_summary[score]
-            if stats['trades'] >= 10: # Lowered threshold for Tier 5 adaptation
+            if stats['trades'] >= 30: # Disciplined Threshold
                 exp = stats['expectancy']
                 pf = stats.get('profit_factor', 1.0)
                 avg_slippage = stats.get('avg_slippage', 0.0)
@@ -289,7 +291,8 @@ class RiskManager:
             return False
 
         g = performance_summary["GLOBAL"]
-        if g['trades'] < 10:
+        # Rule: Minimum 20 trades before global toxicity filter activates to avoid noise rejections.
+        if g['trades'] < 20:
             return False
 
         # 1. Profit Factor Check
