@@ -155,7 +155,8 @@ class Brain:
             # Tier 5 Regime Filter: Protect capital during bearish/unknown markets
             threshold = config.SCORE_THRESHOLD if market_trend == "bullish" else 5
 
-        if display_score in self.disabled_scores:
+        # Check against disabled buckets (Integer-based optimization)
+        if int(display_score) in self.disabled_scores:
             action = "HOLD (DISABLED BY OPTIMIZER)"
         elif display_score >= threshold + 1:
             action = "STRONG BUY"

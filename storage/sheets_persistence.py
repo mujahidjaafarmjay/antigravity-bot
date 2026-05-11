@@ -387,7 +387,7 @@ class SheetsPersistence:
                 ["Bot Status", status],
                 ["Compounding Mult", "1.01x" if balance >= peak else "1.00x"]
             ]
-            self.dash_tab.update("B2:B10", [[k[1]] for k in kpis])
+            self.dash_tab.update(range_name="B2:B10", values=[[k[1]] for k in kpis])
         except Exception as e:
             self.logger.error(f"Error updating Dashboard: {e}")
 
