@@ -60,7 +60,7 @@ class Brain:
         # Allow trading from 08:00 UTC (London Open) to 20:00 UTC (Post NY Close)
         return 8 <= hour < 20
 
-    def evaluate_trade(self, symbol, df, balance):
+    def evaluate_trade(self, symbol, df, balance, min_score=None):
         """
         Core strategy logic.
         Returns a decision dictionary.
@@ -145,11 +145,12 @@ class Brain:
         action = "HOLD"
         # Determine action threshold (Soft Regime Filter)
         # Bullish BTC: Trade Score 3+ | Bearish BTC: Only Trade Score 5+
-        # We'll need the global market trend passed in or calculated here
         market_trend = getattr(self, 'current_market_trend', "bullish")
 
-        # During Calibration, we log Score 3 regardless of trend
-        if config.CALIBRATION_MODE:
+        # Determine dynamic threshold
+        if min_score is not None:
+            threshold = min_score
+        elif config.CALIBRATION_MODE:
             threshold = config.MIN_SCORE_TO_TRADE
         else:
             # Tier 5 Regime Filter: Protect capital during bearish/unknown markets
@@ -158,12 +159,13 @@ class Brain:
         # Check against disabled buckets (Integer-based optimization)
         if int(display_score) in self.disabled_scores:
             action = "HOLD (DISABLED BY OPTIMIZER)"
-        elif display_score >= threshold + 1:
-            action = "STRONG BUY"
         elif display_score >= threshold:
-            action = "BUY"
+            # Check if it meets the mandatory minimum for the current mode
+            action = "STRONG BUY" if display_score >= (threshold + 1) else "BUY"
         elif display_score >= 2:
             action = "WATCH"
+        else:
+            action = "SKIP"
 
         # 4. SL/TP Calculation (Handled by Risk Manager, but we provide base values)
         # SL = Lowest low of last 10 candles

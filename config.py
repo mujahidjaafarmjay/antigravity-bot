@@ -42,6 +42,15 @@ HALAL_PAIRS = [
     "TONUSDT", "QNTUSDT", "ENSUSDT", "GRTUSDT", "IMXUSDT"
 ]
 
+# ── Portfolio Correlation Groups ──────────────────────────────
+CORRELATION_GROUPS = {
+    "CORE": ["BTCUSDT", "ETHUSDT", "SOLUSDT"],
+    "L2": ["OPUSDT", "ARBUSDT", "STXUSDT"],
+    "ALT_L1": ["AVAXUSDT", "NEARUSDT", "SUIUSDT", "APTUSDT", "TIAUSDT", "TONUSDT", "ATOMUSDT", "ADAUSDT", "DOTUSDT"],
+    "INFRA_DEFI": ["LINKUSDT", "INJUSDT", "FILUSDT", "ARUSDT", "ICPUSDT", "QNTUSDT", "ENSUSDT", "GRTUSDT", "IMXUSDT", "KASUSDT"]
+}
+MAX_CORRELATED_POSITIONS = 1 # Strictly 1 trade per group for a $40 account
+
 # ── Risk Management ──────────────────────────────────────────
 # Risk per trade is dynamic (calculated in risk_manager.py)
 MAX_OPEN_TRADES            = int(os.environ.get("MAX_OPEN_TRADES", "1")) # Capped to 1 for $40

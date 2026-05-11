@@ -382,7 +382,7 @@ class SheetsPersistence:
                 ["Recovery Progress (%)", f"{recovery_prog:.1f}%"],
                 ["Avg Slippage (bps)", f"{g.get('avg_slippage', 0)*10000:.1f}"],
                 ["Profit Factor", f"{g.get('profit_factor', 1.0):.2f}"],
-                ["Real Edge (bps)", f"{g.get('real_edge', 0)*10000:.1f}"],
+                ["Real Edge (bps)", f"{g.get('real_edge_bps', 0):.1f}"],
                 ["Last Update", now],
                 ["Bot Status", status],
                 ["Compounding Mult", "1.01x" if balance >= peak else "1.00x"]
@@ -428,7 +428,7 @@ class SheetsPersistence:
                 rows.append([
                     metric_type, key, s.get('trades', 0), f"{s.get('win_rate', 0):.1%}",
                     f"${s.get('net_pnl', 0):.2f}", f"{s.get('expectancy', 0):.4f}", f"{s.get('profit_factor', 0):.2f}",
-                    f"{s.get('real_edge', 0)*10000:.1f} bps", f"{s.get('avg_slippage', 0)*10000:.1f} bps", now
+                    f"{s.get('real_edge_bps', 0):.1f} bps", f"{s.get('avg_slippage', 0)*10000:.1f} bps", now
                 ])
             self.stats_tab.clear()
             self.stats_tab.append_row(["Metric_Type", "Key", "Trades", "WinRate", "NetPnL", "Expectancy", "ProfitFactor", "RealEdge", "AvgSlip", "LastUpdate"])
@@ -527,27 +527,41 @@ class SheetsPersistence:
         # Finalize calculations
         final_summary = {}
         for key, s in summary.items():
-            win_rate = s.get("wins", 0) / s["trades"] if s["trades"] > 0 else 0
+            trades = s["trades"]
+            if trades == 0: continue
+
+            win_rate = s.get("wins", 0) / trades
+            # Since 'pnl' in summary is already NET of fees and slippage from fill:
             avg_win = s.get("gross_win_pnl", 0) / s.get("wins", 1) if s.get("wins", 0) > 0 else 0.0
             avg_loss = s.get("gross_loss_pnl", 0) / s.get("losses", 1) if s.get("losses", 0) > 0 else 0.0
+
+            # Net Expectancy ($) per trade after fees and fill-slippage
             expectancy = (win_rate * avg_win) - ((1 - win_rate) * avg_loss)
+
             profit_factor = s.get("gross_win_pnl", 0) / s.get("gross_loss_pnl", 1) if s.get("gross_loss_pnl", 0) > 0 else (float('inf') if s.get("gross_win_pnl", 0) > 0 else 1.0)
 
-            avg_slippage = sum(s.get("slippages", [])) / s["trades"] if s["trades"] > 0 else 0
-            net_pnl = s.get("gross_win_pnl", 0) - s.get("gross_loss_pnl", 0) - s.get("total_fees", 0)
+            # avg_slippage here is dollar amount of slippage per unit price change?
+            # No, in log_outcome it was price difference. Let's assume it's normalized or small enough.
+            # Real Edge calculation (bps):
+            # We assume an average trade notional of $7.0 for a $40 account
+            avg_notional = 7.0
 
-            avg_spread_ratio = 0.001
-            exec_cost_ratio = avg_slippage + avg_spread_ratio + 0.002
-            real_edge = expectancy - exec_cost_ratio
+            # Convert $ expectancy to bps
+            expectancy_bps = (expectancy / avg_notional) * 10000
+
+            # Estimated remaining friction (Spread ~ 10bps)
+            est_spread_bps = 10.0
+            real_edge = expectancy_bps - est_spread_bps
 
             final_summary[key] = {
                 "score": key,
-                "trades": s["trades"],
+                "trades": trades,
                 "win_rate": win_rate,
-                "net_pnl": net_pnl,
-                "expectancy": expectancy,
-                "real_edge": real_edge,
-                "avg_slippage": avg_slippage,
+                "net_pnl": s.get("gross_win_pnl", 0) - s.get("gross_loss_pnl", 0),
+                "expectancy": expectancy, # $ terms
+                "real_edge": real_edge / 10000, # convert back to ratio for is_market_toxic
+                "real_edge_bps": real_edge,
+                "avg_slippage": sum(s.get("slippages", [])) / trades,
                 "profit_factor": profit_factor,
                 "avg_win": avg_win,
                 "avg_loss": avg_loss,

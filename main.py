@@ -60,13 +60,14 @@ class TradingBot:
         self.closed_trades_count = 0 # Counter to avoid aggressive optimization
         self.instance_id = datetime.now().strftime("%H%M%S") # Unique ID for this run
         self.last_heartbeat = datetime.now(self.utc)
+        self.last_heartbeat_state = {} # Tier 9: State tracking to reduce noise
         self.last_loop_start = datetime.now(self.utc)
         self.last_error_alert = 0.0 # Throttling
         self.perf_summary = {} # Global state guard
         self.rejection_stats = {
             "score_filter": 0, "spread_filter": 0, "pair_ban": 0,
             "volatility_guard": 0, "recovery_mode": 0, "rr_filter": 0,
-            "session_filter": 0, "equity_protection": 0
+            "session_filter": 0, "equity_protection": 0, "correlation_guard": 0
         }
         
     def _recover_state(self):
@@ -315,30 +316,46 @@ class TradingBot:
                     balance = self.bybit.get_balance()
                     drawdown = (self.risk.peak_balance - balance) / self.risk.peak_balance if self.risk.peak_balance > 0 else 0
 
-                    # Top rejection reasons summary
-                    sorted_rejections = sorted(self.rejection_stats.items(), key=lambda x: x[1], reverse=True)
-                    rej_text = "\n".join([f"• {k}: {v}" for k, v in sorted_rejections if v > 0])
+                    # Capture current state to detect changes
+                    current_state = {
+                        "balance": round(balance, 2),
+                        "daily_pnl": round(self.daily_pnl, 2),
+                        "active_count": len(self.active_trades),
+                        "recovery_mode": self.risk.in_recovery_mode,
+                        "top_rejection": max(self.rejection_stats, key=self.rejection_stats.get) if any(self.rejection_stats.values()) else None
+                    }
 
-                    # Tier 9: Missed Edge Analysis (from Shadow Trades)
-                    shadow_wins = len([s for s in self.active_shadow_trades.values() if s.get('outcome') == "V_WIN"])
-                    shadow_losses = len([s for s in self.active_shadow_trades.values() if s.get('outcome') == "V_LOSS"])
+                    has_changed = current_state != self.last_heartbeat_state
 
-                    # Tier 9: Detect active threshold
-                    threshold = 4.0 if self.risk.in_recovery_mode else 3.0
-                    if config.CALIBRATION_MODE: threshold = 3.0
+                    if has_changed:
+                        # Full Heartbeat
+                        sorted_rejections = sorted(self.rejection_stats.items(), key=lambda x: x[1], reverse=True)
+                        rej_text = "\n".join([f"• {k}: {v}" for k, v in sorted_rejections if v > 0])
 
-                    self.telegram.send_message(
-                        f"💓 <b>SYSTEM HEALTH REPORT</b>\n"
-                        f"━━━━━━━━━━━━━━━\n"
-                        f"<b>ID:</b> {self.instance_id}\n"
-                        f"<b>Mode:</b> {'RECOVERY' if self.risk.in_recovery_mode else 'GROWTH'} (Min: {threshold})\n"
-                        f"<b>Balance:</b> ${balance:.2f} (DD: {drawdown:.2%})\n"
-                        f"<b>Daily PnL:</b> ${self.daily_pnl:.2f}\n"
-                        f"<b>Active Trades:</b> {len(self.active_trades)}\n"
-                        f"<b>Shadow Monitor:</b> {len(self.active_shadow_trades)} tracking\n"
-                        f"━━━━━━━━━━━━━━━\n"
-                        f"📊 <b>Today's Rejections:</b>\n{rej_text if rej_text else 'None'}"
-                    )
+                        threshold = 4.0 if self.risk.in_recovery_mode else 3.0
+                        if config.CALIBRATION_MODE: threshold = 3.0
+
+                        self.telegram.send_message(
+                            f"💓 <b>SYSTEM HEALTH REPORT</b>\n"
+                            f"━━━━━━━━━━━━━━━\n"
+                            f"<b>ID:</b> {self.instance_id}\n"
+                            f"<b>Mode:</b> {'RECOVERY' if self.risk.in_recovery_mode else 'GROWTH'} (Min: {threshold})\n"
+                            f"<b>Balance:</b> ${balance:.2f} (DD: {drawdown:.2%})\n"
+                            f"<b>Daily PnL:</b> ${self.daily_pnl:.2f}\n"
+                            f"<b>Active Trades:</b> {len(self.active_trades)}\n"
+                            f"<b>Shadow Monitor:</b> {len(self.active_shadow_trades)} tracking\n"
+                            f"━━━━━━━━━━━━━━━\n"
+                            f"📊 <b>Today's Rejections:</b>\n{rej_text if rej_text else 'None'}"
+                        )
+                    else:
+                        # Compact Heartbeat to reduce alert fatigue
+                        self.telegram.send_message(
+                            f"💓 <b>ALIVE</b>\n"
+                            f"ID: {self.instance_id} | Engine healthy.\n"
+                            f"No significant state changes detected."
+                        )
+
+                    self.last_heartbeat_state = current_state
                     self.last_heartbeat = now
 
                 # 1. Safety Checks (Institutional Gate)
@@ -441,20 +458,19 @@ class TradingBot:
                     if df is None:
                         continue
 
-                    # Evaluate Trade
-                    # Evaluate Trade
-                    # Recovery Mode: Relaxed to Score 4+ for better activity
+                    # 2. Unified Execution Authority: Synchronized Thresholds
+                    # Determine mandatory minimum score based on mode
+                    required_min = 3.0
                     if getattr(self.risk, 'in_recovery_mode', False) and not config.CALIBRATION_MODE:
-                        orig_threshold = self.brain.disabled_scores.copy()
-                        # Temporarily disable Score 3 in recovery mode (Allow 4+)
-                        self.brain.disabled_scores.add(3)
-                        decision = self.brain.evaluate_trade(symbol, df, balance)
-                        self.brain.disabled_scores = orig_threshold # Reset
+                        required_min = 4.0
 
-                        if decision['score'] < 4:
-                            self.rejection_stats["recovery_mode"] += 1
-                    else:
-                        decision = self.brain.evaluate_trade(symbol, df, balance)
+                    decision = self.brain.evaluate_trade(symbol, df, balance, min_score=required_min)
+
+                    if required_min == 4.0 and decision['score'] < 4.0:
+                         self.rejection_stats["recovery_mode"] += 1
+
+                    if decision['action'] == "SKIP":
+                        continue
 
                     # Tier 4 Volatility Guard
                     if self.risk.is_volatility_too_high(df):
@@ -489,13 +505,14 @@ class TradingBot:
 
                         # Validate with Risk Manager
                         open_orders = self.bybit.get_open_orders()
-                        valid, reason = self.risk.validate_trade(decision, balance, len(open_orders), bid, ask)
+                        valid, reason = self.risk.validate_trade(decision, balance, len(open_orders), bid, ask, active_trades=self.active_trades)
                         
                         if not valid:
                             logger.warning(f"⚠️ Trade Validation Failed for {symbol}: {reason}")
                             # Map reason to stats
                             if "spread" in reason.lower(): self.rejection_stats["spread_filter"] += 1
                             elif "rr" in reason.lower(): self.rejection_stats["rr_filter"] += 1
+                            elif "correlation" in reason.lower(): self.rejection_stats["correlation_guard"] += 1
 
                             # Tier 9: Log to Shadow Trades for analysis
                             shadow_data = decision.copy()
