@@ -144,8 +144,11 @@ class SheetsPersistence:
             try:
                 self.shadow_tab = self.sheet.worksheet("ShadowTrades")
             except gspread.WorksheetNotFound:
-                self.shadow_tab = self.sheet.add_worksheet("ShadowTrades", rows=1000, cols=10)
-                self.shadow_tab.append_row(["Timestamp", "Symbol", "Score", "Reason", "Entry", "SL", "TP"])
+                self.shadow_tab = self.sheet.add_worksheet("ShadowTrades", rows=2000, cols=12)
+                self.shadow_tab.append_row([
+                    "Timestamp", "Symbol", "Score", "Reason", "Entry", "SL", "TP",
+                    "Outcome", "Duration_Mins", "Virtual_PnL", "Status"
+                ])
 
             # BotMeta Tab
             try:
@@ -175,10 +178,28 @@ class SheetsPersistence:
                 trade_data.get('reason'),
                 trade_data.get('entry'),
                 trade_data.get('stop_loss'),
-                trade_data.get('take_profit')
+                trade_data.get('take_profit'),
+                "PENDING", "", 0.0, "ACTIVE"
             ])
         except Exception as e:
             self.logger.error(f"Error logging shadow trade: {e}")
+
+    def update_shadow_outcome(self, symbol, timestamp, outcome, duration, pnl):
+        """Updates a shadow trade row with its virtual outcome."""
+        if not self.shadow_tab: return
+        try:
+            # Find the row by symbol and timestamp
+            cells = self.shadow_tab.findall(symbol)
+            for cell in cells:
+                row_vals = self.shadow_tab.row_values(cell.row)
+                if row_vals[0] == timestamp:
+                    # Update Outcome (H), Duration (I), Virtual_PnL (J), Status (K)
+                    self.shadow_tab.update(range_name=f"H{cell.row}:K{cell.row}", values=[[
+                        outcome, duration, pnl, "CLOSED"
+                    ]])
+                    break
+        except Exception as e:
+            self.logger.error(f"Error updating shadow outcome: {e}")
 
     def log_trade(self, trade_data):
         """Logs a signal/entry to the 'Trades' tab."""
@@ -311,6 +332,28 @@ class SheetsPersistence:
             return active
         except Exception as e:
             self.logger.error(f"Error getting active trades from Sheets: {e}")
+            return {}
+
+    def get_active_shadow_trades(self):
+        """Recovers active shadow trades from Sheets."""
+        if not self.shadow_tab: return {}
+        try:
+            records = self.shadow_tab.get_all_records()
+            active = {}
+            for r in records:
+                if r.get('Status') == "ACTIVE":
+                    active[r['Symbol']] = {
+                        "symbol": r['Symbol'],
+                        "score": r['Score'],
+                        "reason": r['Reason'],
+                        "entry": float(r['Entry']),
+                        "stop_loss": float(r['SL']),
+                        "take_profit": float(r['TP']),
+                        "timestamp": r['Timestamp']
+                    }
+            return active
+        except Exception as e:
+            self.logger.error(f"Error getting shadow trades from Sheets: {e}")
             return {}
 
     def get_all_performance_data(self):

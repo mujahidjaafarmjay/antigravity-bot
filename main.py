@@ -55,6 +55,7 @@ class TradingBot:
         self.execution_lock = {} # Prevent duplicate execution attempts
         self.daily_trade_count = 0 # Tier 7 Frequency Control
         self.active_trades = {} # Track open trades for P&L logging
+        self.active_shadow_trades = {} # Tier 9: Shadow trade tracking
         self.closed_trades_count = 0 # Counter to avoid aggressive optimization
         self.instance_id = datetime.now().strftime("%H%M%S") # Unique ID for this run
         self.last_heartbeat = datetime.now(self.utc)
@@ -73,6 +74,7 @@ class TradingBot:
         meta = self.sheets.get_meta()
         self.risk.peak_balance = meta.get('peak_balance', 0.0)
         self.ranker.banned_until = self.sheets.recover_bans()
+        self.active_shadow_trades = self.sheets.get_active_shadow_trades()
 
         # Daily PnL Reset Logic
         last_run_str = meta.get('last_trade_day', "")
@@ -165,8 +167,43 @@ class TradingBot:
             logger.error(f"Error during optimization cycle: {e}")
             return {}
 
+    def _monitor_shadow_trades(self):
+        """Checks if shadow trades (rejected) would have hit TP or SL."""
+        if not self.active_shadow_trades:
+            return
+
+        for symbol, trade in list(self.active_shadow_trades.items()):
+            try:
+                current_price = self.bybit.get_ticker(symbol)
+                if not current_price: continue
+
+                outcome = None
+                if current_price >= trade['take_profit']:
+                    outcome = "V_WIN"
+                elif current_price <= trade['stop_loss']:
+                    outcome = "V_LOSS"
+                else:
+                    # 4h virtual timeout
+                    start_time = datetime.strptime(trade['timestamp'], "%Y-%m-%d %H:%M:%S").replace(tzinfo=self.utc)
+                    duration = int((datetime.now(self.utc) - start_time).total_seconds() / 60)
+                    if duration >= 240: outcome = "V_TIMEOUT"
+
+                if outcome:
+                    # Virtual PnL (Risk-normalized R-multiple)
+                    pnl_r = 1.0 if outcome == "V_WIN" else (-1.0 if outcome == "V_LOSS" else 0.0)
+                    duration = int((datetime.now(self.utc) - datetime.strptime(trade['timestamp'], "%Y-%m-%d %H:%M:%S").replace(tzinfo=self.utc)).total_seconds() / 60)
+
+                    self.sheets.update_shadow_outcome(symbol, trade['timestamp'], outcome, duration, pnl_r)
+                    del self.active_shadow_trades[symbol]
+                    logger.info(f"👻 SHADOW OUTCOME: {symbol} ended in {outcome}")
+            except Exception as e:
+                logger.error(f"Error monitoring shadow {symbol}: {e}")
+
     def _monitor_active_trades(self):
         """Checks if active trades hit TP or SL."""
+        # Check shadow trades first
+        self._monitor_shadow_trades()
+
         if not self.active_trades:
             return
 
@@ -281,13 +318,21 @@ class TradingBot:
                     sorted_rejections = sorted(self.rejection_stats.items(), key=lambda x: x[1], reverse=True)
                     rej_text = "\n".join([f"• {k}: {v}" for k, v in sorted_rejections if v > 0])
 
+                    # Tier 9: Missed Edge Analysis (from Shadow Trades)
+                    shadow_wins = len([s for s in self.active_shadow_trades.values() if s.get('outcome') == "V_WIN"])
+                    shadow_losses = len([s for s in self.active_shadow_trades.values() if s.get('outcome') == "V_LOSS"])
+
                     self.telegram.send_message(
-                        f"💓 <b>HEARTBEAT</b> (ID: {self.instance_id})\n"
-                        f"Status: ACTIVE\n"
-                        f"Balance: ${balance:.2f}\n"
-                        f"Drawdown: {drawdown:.2%}\n"
-                        f"Daily PnL: ${self.daily_pnl:.2f}\n\n"
-                        f"📊 <b>Rejection Stats:</b>\n{rej_text if rej_text else 'None'}"
+                        f"💓 <b>SYSTEM HEALTH REPORT</b>\n"
+                        f"━━━━━━━━━━━━━━━\n"
+                        f"<b>ID:</b> {self.instance_id}\n"
+                        f"<b>Mode:</b> {'RECOVERY' if self.risk.in_recovery_mode else 'GROWTH'}\n"
+                        f"<b>Balance:</b> ${balance:.2f} (DD: {drawdown:.2%})\n"
+                        f"<b>Daily PnL:</b> ${self.daily_pnl:.2f}\n"
+                        f"<b>Active Trades:</b> {len(self.active_trades)}\n"
+                        f"<b>Shadow Monitor:</b> {len(self.active_shadow_trades)} tracking\n"
+                        f"━━━━━━━━━━━━━━━\n"
+                        f"📊 <b>Today's Rejections:</b>\n{rej_text if rej_text else 'None'}"
                     )
                     self.last_heartbeat = now
 
@@ -450,7 +495,9 @@ class TradingBot:
                             # Tier 9: Log to Shadow Trades for analysis
                             shadow_data = decision.copy()
                             shadow_data['reason'] = reason
+                            shadow_data['timestamp'] = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
                             self.sheets.log_shadow_trade(shadow_data)
+                            self.active_shadow_trades[symbol] = shadow_data
 
                             # Apply short cooldown for blocked trades to avoid log spam
                             self.cooldowns[symbol] = now + timedelta(minutes=5)
