@@ -165,13 +165,33 @@ class RiskManager:
             
         return round(qty, 8), "OK"
 
-    def validate_trade(self, decision, balance, current_open_trades, bid, ask):
+    def validate_trade(self, decision, balance, current_open_trades, bid, ask, active_trades=None):
         """
         Final check before execution.
         """
         # 1. Open Trade Limit
         if current_open_trades >= self.max_open_trades:
             return False, f"Max open trades ({self.max_open_trades}) reached"
+
+        # 1b. Correlation Guard (Tier 9 Institutional)
+        if active_trades:
+            symbol = decision['symbol']
+            # Find group of current symbol
+            current_group = None
+            for group, symbols in config.CORRELATION_GROUPS.items():
+                if symbol in symbols:
+                    current_group = group
+                    break
+
+            if current_group:
+                # Count open trades in the same group
+                group_count = 0
+                for open_symbol in active_trades.keys():
+                    if open_symbol in config.CORRELATION_GROUPS.get(current_group, []):
+                        group_count += 1
+
+                if group_count >= config.MAX_CORRELATED_POSITIONS:
+                    return False, f"Correlation limit for {current_group} reached"
 
         # 2. Minimum Balance
         if balance < 10: # Minimum to trade effectively on Spot
