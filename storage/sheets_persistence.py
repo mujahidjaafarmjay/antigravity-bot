@@ -24,6 +24,7 @@ class SheetsPersistence:
         self.pair_tab = None
         self.session_tab = None
         self.ban_tab = None
+        self.shadow_tab = None
         self._connect()
 
     def _connect(self):
@@ -139,6 +140,13 @@ class SheetsPersistence:
                 self.ban_tab = self.sheet.add_worksheet("BannedPairs", rows=100, cols=2)
                 self.ban_tab.append_row(["Symbol", "BannedUntil"])
 
+            # Shadow Trades (Signals that failed institutional filters)
+            try:
+                self.shadow_tab = self.sheet.worksheet("ShadowTrades")
+            except gspread.WorksheetNotFound:
+                self.shadow_tab = self.sheet.add_worksheet("ShadowTrades", rows=1000, cols=10)
+                self.shadow_tab.append_row(["Timestamp", "Symbol", "Score", "Reason", "Entry", "SL", "TP"])
+
             # BotMeta Tab
             try:
                 self.meta_tab = self.sheet.worksheet("BotMeta")
@@ -155,6 +163,22 @@ class SheetsPersistence:
                 ])
         except Exception as e:
             self.logger.error(f"Error setting up Sheets tabs: {e}")
+
+    def log_shadow_trade(self, trade_data):
+        """Logs a signal that was rejected by filters to 'ShadowTrades'."""
+        if not self.shadow_tab: return
+        try:
+            self.shadow_tab.append_row([
+                datetime.now().strftime("%Y-%m-%d %H:%M:%S"),
+                trade_data.get('symbol'),
+                trade_data.get('score'),
+                trade_data.get('reason'),
+                trade_data.get('entry'),
+                trade_data.get('stop_loss'),
+                trade_data.get('take_profit')
+            ])
+        except Exception as e:
+            self.logger.error(f"Error logging shadow trade: {e}")
 
     def log_trade(self, trade_data):
         """Logs a signal/entry to the 'Trades' tab."""

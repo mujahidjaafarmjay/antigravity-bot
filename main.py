@@ -61,6 +61,11 @@ class TradingBot:
         self.last_loop_start = datetime.now(self.utc)
         self.last_error_alert = 0.0 # Throttling
         self.perf_summary = {} # Global state guard
+        self.rejection_stats = {
+            "score_filter": 0, "spread_filter": 0, "pair_ban": 0,
+            "volatility_guard": 0, "recovery_mode": 0, "rr_filter": 0,
+            "session_filter": 0, "equity_protection": 0
+        }
         
     def _recover_state(self):
         """Recovers state and reconciles Sheets with Exchange reality."""
@@ -266,17 +271,23 @@ class TradingBot:
                 # 0. Global Performance Sync
                 self.perf_summary = self._run_optimization() or self.perf_summary
 
-                # Tier 9: Institutional Heartbeat (Every 30 mins)
+                # Tier 9: Institutional Heartbeat (Every 4 hours)
                 now = datetime.now(self.utc)
-                if (now - self.last_heartbeat).total_seconds() >= 1800:
+                if (now - self.last_heartbeat).total_seconds() >= 14400:
                     balance = self.bybit.get_balance()
                     drawdown = (self.risk.peak_balance - balance) / self.risk.peak_balance if self.risk.peak_balance > 0 else 0
+
+                    # Top rejection reasons summary
+                    sorted_rejections = sorted(self.rejection_stats.items(), key=lambda x: x[1], reverse=True)
+                    rej_text = "\n".join([f"• {k}: {v}" for k, v in sorted_rejections if v > 0])
+
                     self.telegram.send_message(
                         f"💓 <b>HEARTBEAT</b> (ID: {self.instance_id})\n"
                         f"Status: ACTIVE\n"
                         f"Balance: ${balance:.2f}\n"
                         f"Drawdown: {drawdown:.2%}\n"
-                        f"Daily PnL: ${self.daily_pnl:.2f}"
+                        f"Daily PnL: ${self.daily_pnl:.2f}\n\n"
+                        f"📊 <b>Rejection Stats:</b>\n{rej_text if rej_text else 'None'}"
                     )
                     self.last_heartbeat = now
 
@@ -381,25 +392,33 @@ class TradingBot:
                         continue
 
                     # Evaluate Trade
-                    # Recovery Mode: Increase threshold to Score 5+
+                    # Evaluate Trade
+                    # Recovery Mode: Relaxed to Score 4+ for better activity
                     if getattr(self.risk, 'in_recovery_mode', False) and not config.CALIBRATION_MODE:
                         orig_threshold = self.brain.disabled_scores.copy()
-                        # Temporarily disable lower scores (3, 4) in recovery mode
-                        self.brain.disabled_scores.update({3, 4})
+                        # Temporarily disable Score 3 in recovery mode (Allow 4+)
+                        self.brain.disabled_scores.add(3)
                         decision = self.brain.evaluate_trade(symbol, df, balance)
                         self.brain.disabled_scores = orig_threshold # Reset
+
+                        if decision['score'] < 4:
+                            self.rejection_stats["recovery_mode"] += 1
                     else:
                         decision = self.brain.evaluate_trade(symbol, df, balance)
 
                     # Tier 4 Volatility Guard
                     if self.risk.is_volatility_too_high(df):
                         logger.warning(f"⚠️ Volatility Spike detected for {symbol}. Skipping entry.")
+                        self.rejection_stats["volatility_guard"] += 1
                         continue
                     logger.info(f"Decision for {symbol}: {decision['action']} (Score: {decision['score']}) - {decision['reason']}")
 
                     # Debug Telegram (Only if score is new or changed to avoid spam)
                     last_score = self.reported_signals.get(symbol, 0)
                     if decision['score'] >= 3 and decision['score'] != last_score:
+                        if "HOLD (DISABLED BY OPTIMIZER)" in decision['action']:
+                            self.rejection_stats["score_filter"] += 1
+
                         self.telegram.send_message(
                             f"🔍 <b>{symbol} Analysis</b> (ID: {self.instance_id})\n"
                             f"Score: {decision['score']}\n"
@@ -414,6 +433,7 @@ class TradingBot:
                         # Tier 4 Equity Protection Check (Uses cached snapshot)
                         if self.risk.is_equity_under_pressure(self.perf_summary):
                             logger.warning(f"⚠️ Equity Protection: Recent PF < {config.EQUITY_PROTECT_THRESHOLD}. Skipping {symbol}.")
+                            self.rejection_stats["equity_protection"] += 1
                             self.telegram.send_message(f"⚠️ <b>Equity Guard:</b> Skipping {symbol} due to recent performance pressure.")
                             continue
 
@@ -423,6 +443,15 @@ class TradingBot:
                         
                         if not valid:
                             logger.warning(f"⚠️ Trade Validation Failed for {symbol}: {reason}")
+                            # Map reason to stats
+                            if "spread" in reason.lower(): self.rejection_stats["spread_filter"] += 1
+                            elif "rr" in reason.lower(): self.rejection_stats["rr_filter"] += 1
+
+                            # Tier 9: Log to Shadow Trades for analysis
+                            shadow_data = decision.copy()
+                            shadow_data['reason'] = reason
+                            self.sheets.log_shadow_trade(shadow_data)
+
                             # Apply short cooldown for blocked trades to avoid log spam
                             self.cooldowns[symbol] = now + timedelta(minutes=5)
                             self.telegram.send_message(f"⚠️ <b>Trade Blocked: {symbol}</b>\nReason: {reason}")
@@ -450,6 +479,7 @@ class TradingBot:
                             # 4. Check Pair Ranker hard filter
                             if self.ranker.should_skip_symbol(symbol):
                                 logger.warning(f"PairRanker: Skipping {symbol} due to toxic performance history.")
+                                self.rejection_stats["pair_ban"] += 1
                                 continue
 
                             # 5. Calculate Metrics for Logging
